@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { supabase } from './supabase'
 
 const COLORS = {
   navy: "#0A1628",
