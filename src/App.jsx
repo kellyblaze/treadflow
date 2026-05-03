@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from './supabase'
+import { supabase } from "./supabase";
 
 const COLORS = {
   navy: "#0A1628",
@@ -215,7 +215,7 @@ function LandingPage({ nav }) {
             <div style={{ fontSize: 40, fontWeight: 800, color: p.highlight ? COLORS.blue : COLORS.gray900 }}>${p.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
             <div style={{ borderTop: "1px solid #E2E8F0", margin: "20px 0" }} />
             {p.features.map(f => <div key={f} style={{ display: "flex", gap: 8, fontSize: 14, color: COLORS.gray700, marginBottom: 8 }}><span style={{ color: COLORS.green }}>✓</span>{f}</div>)}
-            <button onClick={() => nav("invite")} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20 }}>Apply for Access</button>
+            <button onClick={() => redirectToCheckout(p.paymentLink)} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20 }}>Get Started →</button>
           </div>)}
         </div>
         <div style={{ textAlign: "center", marginTop: 40, color: COLORS.gray500, fontSize: 13 }}>
@@ -254,21 +254,6 @@ function InvitePage({ nav }) {
   const features = ["Online tire storefront","Inventory management","Online ordering","Appointment booking","Payments/deposits","AI chatbot","SEO/local marketing"];
   const set = (k, v) => setForm(f => ({...f, [k]: v}));
   const toggleFeat = f => set("features", form.features.includes(f) ? form.features.filter(x => x !== f) : [...form.features, f]);
-  const submitApplication = async () => {
-  const { error } = await supabase
-    .from('invite_applications')
-    .insert({
-      shop_name: form.shopName,
-      owner_name: form.ownerName,
-      email: form.email,
-      phone: form.phone,
-      city: form.city,
-      state: form.state,
-      status: 'New'
-    })
-  if (error) console.error(error)
-  setStep(2)
-}
   if (step === 2) return (
     <div style={{ minHeight: "100vh", background: COLORS.navy, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: "60px 48px", textAlign: "center", maxWidth: 520 }}>
@@ -343,7 +328,7 @@ function InvitePage({ nav }) {
             <label style={S.label}>Additional Notes</label>
             <textarea style={{ ...S.input, height: 80, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} />
           </div>
-          <button onClick={submitApplication} style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", marginTop: 24, fontWeight: 700 }}>Submit Application →</button>
+          <button onClick={() => setStep(2)} style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", marginTop: 24, fontWeight: 700 }}>Submit Application →</button>
         </div>
       </div>
     </div>
@@ -846,6 +831,7 @@ function ShopDashboard({ nav }) {
         {sidebar.map(([id, icon, label]) => <SidebarLink key={id} icon={icon} label={label} active={section === id} onClick={() => { setSection(id); setSelectedTire(null); }} />)}
         <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
           <button onClick={() => nav("storefront")} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)", width: "100%" }}>View My Storefront</button>
+          <button onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)", width: "100%" }}>Logout</button>
           <button onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.4)", border: "none", width: "100%" }}>← Back to Home</button>
         </div>
       </div>
@@ -1454,18 +1440,252 @@ function InviteOnboarding({ nav }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// ROOT APP
-// ══════════════════════════════════════════════════════════════════════════
+async function validateInviteCode(inviteCode) {
+  const code = (inviteCode || "").trim();
+  if (!code) return { ok: false, reason: "Invite code is required." };
+
+  const { data, error } = await supabase
+    .from("invite_codes")
+    .select("*")
+    .eq("code", code)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, reason: error.message || "Unable to verify invite code." };
+  }
+  if (!data) return { ok: false, reason: "Invalid invite code." };
+
+  if (typeof data.is_active === "boolean" && !data.is_active) return { ok: false, reason: "This invite code is no longer active." };
+  if (data.status && String(data.status).toLowerCase() !== "active") return { ok: false, reason: "This invite code is not active." };
+  if (data.used_at) return { ok: false, reason: "This invite code has already been used." };
+
+  if (data.expires_at) {
+    const expiresAt = new Date(data.expires_at).getTime();
+    if (!Number.isNaN(expiresAt) && Date.now() > expiresAt) return { ok: false, reason: "This invite code has expired." };
+  }
+
+  return { ok: true, data };
+}
+
+const authShellBg = `linear-gradient(135deg, ${COLORS.navy} 0%, ${COLORS.navyLight} 55%, #1a1a2e 100%)`;
+
+function AuthCardShell({ children, maxWidth = 480 }) {
+  return (
+    <div style={{ minHeight: "100vh", background: authShellBg, fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "16px 24px", display: "flex", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 32, height: 32, background: COLORS.orange, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#fff", fontSize: 16 }}>T</div>
+          <span style={{ color: "#fff", fontWeight: 700, fontSize: 17 }}>TreadFlow</span>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 20px 48px" }}>
+        <div style={{ background: "#fff", borderRadius: 20, padding: "40px 40px", maxWidth, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.12)" }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoginPage({ nav }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    setLoading(false);
+    if (error) setError(error.message);
+  };
+
+  const linkStyle = { background: "none", border: "none", padding: 0, margin: 0, cursor: "pointer", color: COLORS.blue, fontSize: 14, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3, fontFamily: "inherit" };
+
+  return (
+    <AuthCardShell maxWidth={460}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.orange, letterSpacing: 1.2, marginBottom: 10, textTransform: "uppercase" }}>Shop owner login</div>
+      <h2 style={{ fontSize: 28, fontWeight: 800, color: COLORS.gray900, margin: "0 0 8px" }}>Welcome back</h2>
+      <p style={{ color: COLORS.gray500, margin: "0 0 24px", fontSize: 15, lineHeight: 1.55 }}>Sign in with the email and password for your shop.</p>
+
+      <form onSubmit={onSubmit}>
+        <label style={S.label}>Email</label>
+        <input style={{ ...S.input, marginBottom: 12 }} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+        <label style={S.label}>Password</label>
+        <input type="password" style={{ ...S.input, marginBottom: 14 }} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+
+        {error && (
+          <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginBottom: 16, lineHeight: 1.45 }}>
+            {error}
+          </div>
+        )}
+
+        <button type="submit" disabled={loading} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", opacity: loading ? 0.75 : 1 }}>
+          {loading ? "Signing in…" : "Sign in →"}
+        </button>
+      </form>
+
+      <p style={{ textAlign: "center", margin: "18px 0 0", fontSize: 14, color: COLORS.gray600 }}>
+        Need an account?{" "}
+        <button type="button" onClick={() => nav("signup")} style={linkStyle}>
+          Sign up with an invite code
+        </button>
+      </p>
+
+      <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid ${COLORS.gray200}` }}>
+        <button type="button" onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: COLORS.gray600, border: `1px solid ${COLORS.gray300}` }}>
+          ← Back to public site
+        </button>
+      </div>
+    </AuthCardShell>
+  );
+}
+
+function SignUpPage({ nav }) {
+  const [inviteCode, setInviteCode] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setSuccessMsg(null);
+
+    if (password.length < 6) return setError("Password must be at least 6 characters.");
+    if (password !== confirm) return setError("Passwords do not match.");
+
+    setLoading(true);
+
+    const validation = await validateInviteCode(inviteCode);
+    if (!validation.ok) {
+      setLoading(false);
+      return setError(validation.reason);
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          invite_code: inviteCode.trim(),
+        },
+      },
+    });
+
+    setLoading(false);
+
+    if (error) return setError(error.message);
+
+    if (data?.session) {
+      setSuccessMsg("Account created. You’re signed in — heading to your dashboard.");
+    } else {
+      setSuccessMsg("Account created. Check your email to confirm your address, then return here to log in.");
+    }
+  };
+
+  return (
+    <AuthCardShell maxWidth={520}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.orange, letterSpacing: 1.2, marginBottom: 10, textTransform: "uppercase" }}>Invite-only sign up</div>
+      <h2 style={{ fontSize: 28, fontWeight: 800, color: COLORS.gray900, margin: "0 0 8px" }}>Create your shop account</h2>
+      <p style={{ color: COLORS.gray500, margin: "0 0 24px", fontSize: 15, lineHeight: 1.55 }}>Enter the invite code you received, then choose your login email and password.</p>
+
+      <form onSubmit={onSubmit}>
+        <label style={S.label}>Invite code</label>
+        <input style={{ ...S.input, marginBottom: 12, fontFamily: "ui-monospace, monospace", fontWeight: 700, letterSpacing: 1 }} value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} placeholder="e.g. TF-SC-KX92PL" />
+        <label style={S.label}>Email</label>
+        <input style={{ ...S.input, marginBottom: 12 }} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+        <label style={S.label}>Password</label>
+        <input type="password" style={{ ...S.input, marginBottom: 12 }} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+        <label style={S.label}>Confirm password</label>
+        <input type="password" style={{ ...S.input, marginBottom: 14 }} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+
+        {error && (
+          <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginBottom: 16, lineHeight: 1.45 }}>
+            {error}
+          </div>
+        )}
+        {successMsg && (
+          <div role="status" style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#166534", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginBottom: 16, lineHeight: 1.55 }}>
+            ✓ {successMsg}
+          </div>
+        )}
+
+        <button type="submit" disabled={loading || !!successMsg} style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", fontWeight: 700, opacity: loading || successMsg ? 0.75 : 1 }}>
+          {loading ? "Creating account…" : "Create account →"}
+        </button>
+      </form>
+
+      <p style={{ textAlign: "center", margin: "18px 0 0", fontSize: 14, color: COLORS.gray600 }}>
+        Already have an account?{" "}
+        <button type="button" onClick={() => nav("login")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: COLORS.blue, fontSize: 14, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3, fontFamily: "inherit" }}>
+          Log in
+        </button>
+      </p>
+
+      <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid ${COLORS.gray200}` }}>
+        <button type="button" onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: COLORS.gray600, border: `1px solid ${COLORS.gray300}` }}>
+          ← Back to public site
+        </button>
+      </div>
+    </AuthCardShell>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState("home");
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [intendedPage, setIntendedPage] = useState("shop");
 
-  const nav = (p) => setPage(p);
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) console.warn("supabase.auth.getSession error:", error);
+      setSession(data?.session ?? null);
+      setAuthReady(true);
+    });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      data?.subscription?.unsubscribe?.();
+    };
+  }, []);
+
+  // If the user is on auth pages and gets a session, send them where they meant to go.
+  useEffect(() => {
+    if (!authReady) return;
+    if (session && (page === "login" || page === "signup")) setPage(intendedPage || "shop");
+  }, [authReady, intendedPage, page, session]);
+
+  const nav = (p) => {
+    const protectedPages = new Set(["shop"]);
+    if (protectedPages.has(p) && !session) {
+      setIntendedPage(p);
+      setPage("login");
+      return;
+    }
+    setPage(p);
+  };
 
   const navBar = (
     <div style={{ background: COLORS.navy, padding: "10px 20px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontFamily: "system-ui, sans-serif" }}>
       <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginRight: 4 }}>Navigate:</span>
-      {[["home","🌐 Public Site"],["invite","📝 Request Invite"],["market","📍 Market Check"],["onboarding","🔑 Invite Onboarding"],["admin","🛠 Super Admin"],["shop","🏪 Shop Dashboard"],["storefront","🛞 Shop Storefront"]].map(([p, l]) => <button key={p} onClick={() => nav(p)} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 6, cursor: "pointer", background: page === p ? COLORS.blue : "rgba(255,255,255,0.1)", color: "#fff", border: "none", fontWeight: page === p ? 700 : 400 }}>{l}</button>)}
+      {[["home","🌐 Public Site"],["login","🔐 Login"],["signup","✨ Sign Up"],["invite","📝 Request Invite"],["market","📍 Market Check"],["onboarding","🔑 Invite Onboarding"],["admin","🛠 Super Admin"],["shop","🏪 Shop Dashboard"],["storefront","🛞 Shop Storefront"]].map(([p, l]) => <button key={p} onClick={() => nav(p)} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 6, cursor: "pointer", background: page === p ? COLORS.blue : "rgba(255,255,255,0.1)", color: "#fff", border: "none", fontWeight: page === p ? 700 : 400 }}>{l}</button>)}
     </div>
   );
 
@@ -1473,11 +1693,13 @@ export default function App() {
     <div style={{ minHeight: "100vh" }}>
       {navBar}
       {page === "home" && <LandingPage nav={nav} />}
+      {page === "login" && <LoginPage nav={nav} />}
+      {page === "signup" && <SignUpPage nav={nav} />}
       {page === "invite" && <InvitePage nav={nav} />}
       {page === "market" && <MarketPage nav={nav} />}
       {page === "onboarding" && <InviteOnboarding nav={nav} />}
       {page === "admin" && <SuperAdmin nav={nav} />}
-      {page === "shop" && <ShopDashboard nav={nav} />}
+      {page === "shop" && (authReady ? (session ? <ShopDashboard nav={nav} /> : <LoginPage nav={nav} />) : <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>Loading...</div>)}
       {page === "storefront" && <Storefront nav={nav} />}
     </div>
   );
