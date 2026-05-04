@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
-
+const redirectToCheckout = (paymentLink) => {
+  console.log("Redirecting to:", paymentLink);
+  if (!paymentLink) { alert("No payment link found!"); return; }
+  window.location.href = paymentLink;
+};
+  
 const COLORS = {
   navy: "#0A1628",
   navyLight: "#0F2040",
@@ -141,10 +146,10 @@ function LandingPage({ nav }) {
     { icon: "📱", title: "Customer Notifications", desc: "Automated email (and SMS) updates on order status, appointment reminders, and confirmations." },
     { icon: "🎨", title: "Custom Storefront Design", desc: "Your storefront built and styled to match your brand — not a generic template." },
   ];
-  const plans = [
-    { name: "Early Partner", price: 149, highlight: false, features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
-    { name: "Growth Partner", price: 249, highlight: true, features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
-    { name: "Market Leader", price: 399, highlight: false, features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
+  const localPlans = [
+    { name: "Early Partner", price: 149, highlight: false, paymentLink: "https://buy.stripe.com/test_5kQbJ033hcZd4333v68so00", features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
+    { name: "Growth Partner", price: 249, highlight: true, paymentLink: "https://buy.stripe.com/test_eVq00i47l9N17ff6Hi8so01", features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
+    { name: "Market Leader", price: 399, highlight: false, paymentLink: "https://buy.stripe.com/test_28EdR85bp3oDczze9K8so02", features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
   ];
   const faqs = [
     ["Is TreadFlow open to any tire shop?", "No. TreadFlow is invite-only. We review each applicant for market fit and shop readiness before granting access."],
@@ -209,7 +214,7 @@ function LandingPage({ nav }) {
           <p style={{ color: COLORS.gray500 }}>Plans are assigned after your application is reviewed and approved.</p>
         </div>
         <div style={{ display: "flex", gap: 24, justifyContent: "center", flexWrap: "wrap", maxWidth: 1000, margin: "0 auto" }}>
-          {plans.map(p => <div key={p.name} style={{ flex: "1 1 280px", maxWidth: 320, borderRadius: 16, border: p.highlight ? `2px solid ${COLORS.blue}` : "1px solid #E2E8F0", padding: "32px 28px", background: p.highlight ? "#F0F7FF" : "#fff", position: "relative" }}>
+          {localPlans.map(p => <div key={p.name} style={{ flex: "1 1 280px", maxWidth: 320, borderRadius: 16, border: p.highlight ? `2px solid ${COLORS.blue}` : "1px solid #E2E8F0", padding: "32px 28px", background: p.highlight ? "#F0F7FF" : "#fff", position: "relative" }}>
             {p.highlight && <div style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: COLORS.blue, color: "#fff", fontSize: 12, fontWeight: 700, padding: "4px 14px", borderRadius: 99 }}>Most Popular</div>}
             <div style={{ fontWeight: 800, fontSize: 18, color: COLORS.gray900, marginBottom: 4 }}>{p.name}</div>
             <div style={{ fontSize: 40, fontWeight: 800, color: p.highlight ? COLORS.blue : COLORS.gray900 }}>${p.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
