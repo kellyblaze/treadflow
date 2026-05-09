@@ -121,18 +121,71 @@ function orderFromSupabaseRow(row) {
   };
 }
 
+const MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+function formatCustomerRecordDate(created_at) {
+  if (!created_at) return "—";
+  const d = new Date(created_at);
+  return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 10);
+}
+
+function customerVehicleFromRow(row) {
+  const parts = [row.vehicle_year, row.vehicle_make, row.vehicle_model].filter(
+    v => v !== null && v !== undefined && String(v).trim() !== "",
+  );
+  return parts.length ? parts.map(v => String(v).trim()).join(" ") : "—";
+}
+
+function customerFromSupabaseRow(row) {
+  return {
+    id: row.id,
+    shop_id: row.shop_id,
+    name: row.name ?? "",
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    vehicle: customerVehicleFromRow(row),
+    notes: row.notes ?? "",
+    created_at: row.created_at,
+    lastOrderDate: formatCustomerRecordDate(row.created_at),
+  };
+}
+
+function parseAppointmentDateParts(dateVal) {
+  const s = dateVal == null ? "" : String(dateVal).slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return { monthLabel: "—", day: "—", iso: s };
+  const monthIdx = Math.max(0, Math.min(11, parseInt(m[2], 10) - 1));
+  return { monthLabel: MONTH_ABBR[monthIdx], day: String(parseInt(m[3], 10)), iso: s };
+}
+
+function appointmentFromSupabaseRow(row) {
+  const cust = row.customers;
+  const customer = Array.isArray(cust) ? cust[0] : cust;
+  const { monthLabel, day, iso } = parseAppointmentDateParts(row.date);
+  return {
+    id: row.id,
+    shop_id: row.shop_id,
+    customer_id: row.customer_id,
+    order_id: row.order_id,
+    dateIso: iso,
+    monthLabel,
+    day,
+    time: row.time ?? "",
+    status: row.status ?? "Pending",
+    vehicle: row.vehicle_info ?? "—",
+    notes: row.notes ?? "",
+    customerName: customer?.name ?? "—",
+    customerPhone: customer?.phone ?? "",
+    customerEmail: customer?.email ?? "",
+    created_at: row.created_at,
+  };
+}
+
 const mockOrders = [
   { id: "ORD-1042", customer: "Terrence Hall", email: "terrence@email.com", phone: "(864) 555-9021", tire: "Michelin Defender T+H 225/55R17", qty: 4, total: 579.99, status: "Pending", date: "2026-05-01", apptDate: "2026-05-05", vehicle: "2019 Toyota Camry", notes: "Customer requested morning slot" },
   { id: "ORD-1041", customer: "Angela Price", email: "angela@email.com", phone: "(864) 555-3344", tire: "Bridgestone Dueler H/L 265/70R17", qty: 2, total: 389.99, status: "Confirmed", date: "2026-04-30", apptDate: "2026-05-03", vehicle: "2021 Ford F-150", notes: "" },
   { id: "ORD-1040", customer: "Devon Clark", email: "devon@email.com", phone: "(864) 555-7712", tire: "Goodyear Assurance 215/60R16", qty: 4, total: 279.99, status: "Completed", date: "2026-04-28", apptDate: "2026-04-30", vehicle: "2017 Honda Accord", notes: "Paid in full" },
   { id: "ORD-1039", customer: "Shonda Meeks", email: "shonda@email.com", phone: "(864) 555-5501", tire: "Pirelli Scorpion Verde 245/50R20", qty: 4, total: 919.99, status: "Cancelled", date: "2026-04-25", apptDate: null, vehicle: "2022 BMW X5", notes: "Customer cancelled" },
-];
-
-const mockCustomers = [
-  { id: 1, name: "Terrence Hall", email: "terrence@email.com", phone: "(864) 555-9021", vehicle: "2019 Toyota Camry", orders: 2, lastOrder: "2026-05-01" },
-  { id: 2, name: "Angela Price", email: "angela@email.com", phone: "(864) 555-3344", vehicle: "2021 Ford F-150", orders: 1, lastOrder: "2026-04-30" },
-  { id: 3, name: "Devon Clark", email: "devon@email.com", phone: "(864) 555-7712", vehicle: "2017 Honda Accord", orders: 3, lastOrder: "2026-04-28" },
-  { id: 4, name: "Shonda Meeks", email: "shonda@email.com", phone: "(864) 555-5501", vehicle: "2022 BMW X5", orders: 1, lastOrder: "2026-04-25" },
 ];
 
 const mockMarkets = [
@@ -912,8 +965,8 @@ function ShopDashboard({ nav }) {
         {section === "overview" && <ShopOverview tires={tires} orders={orders} />}
         {section === "inventory" && <InventoryPage tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
         {section === "orders" && <OrdersPage orders={orders} setOrders={setOrders} showToast={showToast} />}
-        {section === "appointments" && <AppointmentsPage orders={orders} />}
-        {section === "customers" && <CustomersPage />}
+        {section === "appointments" && <AppointmentsPage showToast={showToast} />}
+        {section === "customers" && <CustomersPage showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "billing" && <ShopBilling />}
@@ -1230,48 +1283,110 @@ function OrdersPage({ orders, setOrders, showToast }) {
   </div>;
 }
 
-function AppointmentsPage({ orders }) {
-  const appts = orders.filter(o => o.apptDate && o.status !== "Cancelled");
+function AppointmentsPage({ showToast }) {
+  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
+  const [appointments, setAppointments] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setAppointmentsLoading(true);
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("*, customers(name, phone, email)")
+        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .order("date", { ascending: false });
+      if (cancelled) return;
+      setAppointmentsLoading(false);
+      if (error) {
+        showToast(error.message);
+        return;
+      }
+      setAppointments((data || []).map(appointmentFromSupabaseRow));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Appointments</h2>
+    {appointmentsLoading && (
+      <div style={{ ...S.card, padding: "48px 24px", textAlign: "center", color: COLORS.gray500, fontSize: 15 }}>
+        Loading appointments…
+      </div>
+    )}
+    {!appointmentsLoading && (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {appts.map(o => <div key={o.id} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <div style={{ background: COLORS.blue, color: "#fff", borderRadius: 10, padding: "10px 14px", textAlign: "center", minWidth: 60 }}>
-            <div style={{ fontSize: 11, fontWeight: 600 }}>MAY</div>
-            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{o.apptDate?.split("-")[2]}</div>
+      {appointments.map(a => <div key={a.id} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", flex: 1, minWidth: 0 }}>
+          <div style={{ background: COLORS.blue, color: "#fff", borderRadius: 10, padding: "10px 14px", textAlign: "center", minWidth: 60, flexShrink: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>{a.monthLabel}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{a.day}</div>
           </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>{o.customer}</div>
-            <div style={{ fontSize: 14, color: COLORS.gray500 }}>{o.vehicle}</div>
-            <div style={{ fontSize: 13, color: COLORS.gray600 }}>{o.tire.split(" ").slice(0,4).join(" ")}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>
+              {a.dateIso}{a.time ? ` · ${a.time}` : ""}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{a.customerName}</div>
+            <div style={{ fontSize: 13, color: COLORS.gray600 }}>
+              {[a.customerPhone, a.customerEmail].filter(Boolean).join(" · ") || "—"}
+            </div>
+            <div style={{ fontSize: 14, color: COLORS.gray500, marginTop: 4 }}><strong style={{ color: COLORS.gray700 }}>Vehicle:</strong> {a.vehicle}</div>
           </div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <span style={S.badge(o.status)}>{o.status}</span>
-          <div style={{ fontSize: 13, color: COLORS.gray400, marginTop: 4 }}>{o.id}</div>
+        <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
+          <span style={S.badge(a.status)}>{a.status}</span>
         </div>
       </div>)}
     </div>
+    )}
   </div>;
 }
 
-function CustomersPage() {
+function CustomersPage({ showToast }) {
+  const [customersLoading, setCustomersLoading] = useState(true);
+  const [customers, setCustomers] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setCustomersLoading(true);
+      const { data, error } = await supabase
+        .from("customers")
+        .select("*")
+        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      setCustomersLoading(false);
+      if (error) {
+        showToast(error.message);
+        return;
+      }
+      setCustomers((data || []).map(customerFromSupabaseRow));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Customers</h2>
+    {customersLoading && (
+      <div style={{ ...S.card, padding: "48px 24px", textAlign: "center", color: COLORS.gray500, fontSize: 15 }}>
+        Loading customers…
+      </div>
+    )}
+    {!customersLoading && (
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{["Name","Phone","Email","Vehicle","Orders","Last Order"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{mockCustomers.map(c => <tr key={c.id}>
+        <thead><tr>{["Name","Phone","Email","Vehicle","Last order"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <tbody>{customers.map(c => <tr key={c.id}>
           <td style={{ ...S.td, fontWeight: 600 }}>{c.name}</td>
           <td style={S.td}>{c.phone}</td>
           <td style={S.td}>{c.email}</td>
           <td style={S.td}>{c.vehicle}</td>
-          <td style={{ ...S.td, fontWeight: 700, color: COLORS.blue }}>{c.orders}</td>
-          <td style={S.td}>{c.lastOrder}</td>
+          <td style={S.td}>{c.lastOrderDate}</td>
         </tr>)}</tbody>
       </table>
     </div>
+    )}
   </div>;
 }
 
