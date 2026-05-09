@@ -1464,6 +1464,70 @@ function ShopBilling() {
   </div>;
 }
 
+function parseVehicleFields(vehicleRaw) {
+  const parts = vehicleRaw.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { vehicle_year: null, vehicle_make: "", vehicle_model: "" };
+  let idx = 0;
+  let vehicle_year = null;
+  if (/^\d{4}$/.test(parts[0])) {
+    vehicle_year = parseInt(parts[0], 10);
+    idx = 1;
+  }
+  const vehicle_make = parts[idx] ?? "";
+  const vehicle_model = parts.slice(idx + 1).join(" ");
+  return { vehicle_year, vehicle_make, vehicle_model };
+}
+
+async function storefrontSubmitReservation({
+  orderTire,
+  name,
+  phone,
+  email,
+  vehicleRaw,
+  quantity,
+}) {
+  const qty = Math.max(1, Math.min(99, parseInt(String(quantity), 10) || 1));
+  const total = +(qty * Number(orderTire.price)).toFixed(2);
+  const { vehicle_year, vehicle_make, vehicle_model } = parseVehicleFields(vehicleRaw);
+
+  const { data: existingCustomer, error: findErr } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("shop_id", PLACEHOLDER_SHOP_ID)
+    .eq("email", email)
+    .maybeSingle();
+  if (findErr) throw findErr;
+
+  if (!existingCustomer) {
+    const { error: custErr } = await supabase.from("customers").insert({
+      shop_id: PLACEHOLDER_SHOP_ID,
+      name,
+      phone,
+      email,
+      vehicle_year,
+      vehicle_make,
+      vehicle_model,
+    });
+    if (custErr) throw custErr;
+  }
+
+  const { data: orderRow, error: orderErr } = await supabase
+    .from("orders")
+    .insert({
+      shop_id: PLACEHOLDER_SHOP_ID,
+      customer_name: name,
+      customer_email: email,
+      customer_phone: phone,
+      quantity: qty,
+      total,
+      status: "pending",
+    })
+    .select("id")
+    .single();
+  if (orderErr) throw orderErr;
+  return orderRow.id;
+}
+
 // ── 6. PUBLIC STOREFRONT ──────────────────────────────────────────────────
 function Storefront({ nav }) {
   const [search, setSearch] = useState("");
@@ -1472,6 +1536,19 @@ function Storefront({ nav }) {
   const [showOrder, setShowOrder] = useState(false);
   const [orderTire, setOrderTire] = useState(null);
   const [orderDone, setOrderDone] = useState(false);
+  const [resName, setResName] = useState("");
+  const [resPhone, setResPhone] = useState("");
+  const [resEmail, setResEmail] = useState("");
+  const [resVehicle, setResVehicle] = useState("");
+  const [resQuantity, setResQuantity] = useState("1");
+  const [resService, setResService] = useState("Installation at Shop");
+  const [resDate, setResDate] = useState("");
+  const [resTime, setResTime] = useState("8:00 AM");
+  const [resPayment, setResPayment] = useState("Pay deposit online ($50)");
+  const [resNotes, setResNotes] = useState("");
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [savedOrderId, setSavedOrderId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([{ from: "bot", text: "Hi! Welcome to Greenville Tire Pros. Ask me anything about our inventory, services, or hours." }]);
@@ -1500,9 +1577,9 @@ function Storefront({ nav }) {
         <div style={{ background: COLORS.gray50, borderRadius: 12, padding: "16px 20px", fontSize: 14, color: COLORS.gray600, marginBottom: 24 }}>
           <div><strong>{orderTire?.brand} {orderTire?.model}</strong></div>
           <div>{orderTire?.size} · {orderTire?.condition}</div>
-          <div style={{ marginTop: 8, color: COLORS.green, fontWeight: 700 }}>Order ID: ORD-{Math.floor(1000 + Math.random() * 9000)}</div>
+          {savedOrderId != null && <div style={{ marginTop: 8, color: COLORS.green, fontWeight: 700 }}>Order ID: {String(savedOrderId)}</div>}
         </div>
-        <button onClick={() => { setOrderDone(false); setSelectedTire(null); setShowOrder(false); }} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Back to Store</button>
+        <button onClick={() => { setOrderDone(false); setSelectedTire(null); setShowOrder(false); setSavedOrderId(null); setOrderError(""); }} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Back to Store</button>
       </div>
     </div>
   );
@@ -1510,7 +1587,7 @@ function Storefront({ nav }) {
   if (showOrder && orderTire) return (
     <div style={{ minHeight: "100vh", background: COLORS.gray50, fontFamily: "system-ui, sans-serif" }}>
       <div style={{ background: storefront.primaryColor, padding: "14px 32px", display: "flex", alignItems: "center", gap: 12 }}>
-        <button onClick={() => setShowOrder(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 14 }}>←</button>
+        <button onClick={() => { setShowOrder(false); setOrderError(""); }} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 14 }}>←</button>
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>{storefront.name}</span>
       </div>
       <div style={{ maxWidth: 680, margin: "40px auto", padding: "0 20px" }}>
@@ -1525,35 +1602,99 @@ function Storefront({ nav }) {
         </div>
         <div style={S.card}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {[["Full Name",""],["Phone Number",""],["Email Address",""],["Vehicle (Year Make Model)",""]].map(([l]) => <div key={l} style={l.includes("Vehicle") ? { gridColumn: "1/-1" } : {}}>
-              <label style={S.label}>{l}</label><input style={S.input} />
-            </div>)}
+            <div>
+              <label style={S.label}>Full Name</label>
+              <input style={S.input} value={resName} onChange={e => setResName(e.target.value)} autoComplete="name" />
+            </div>
+            <div>
+              <label style={S.label}>Phone Number</label>
+              <input style={S.input} value={resPhone} onChange={e => setResPhone(e.target.value)} autoComplete="tel" />
+            </div>
+            <div>
+              <label style={S.label}>Email Address</label>
+              <input type="email" style={S.input} value={resEmail} onChange={e => setResEmail(e.target.value)} autoComplete="email" />
+            </div>
+            <div style={{ gridColumn: "1/-1" }}>
+              <label style={S.label}>Vehicle (Year Make Model)</label>
+              <input style={S.input} placeholder="e.g. 2020 Honda Civic" value={resVehicle} onChange={e => setResVehicle(e.target.value)} />
+            </div>
             <div>
               <label style={S.label}>Quantity</label>
-              <select style={{ ...S.select, width: "100%" }}>{[1,2,3,4].map(n => <option key={n}>{n}</option>)}</select>
+              <select style={{ ...S.select, width: "100%" }} value={resQuantity} onChange={e => setResQuantity(e.target.value)}>
+                {[1, 2, 3, 4].map(n => <option key={n} value={String(n)}>{n}</option>)}
+              </select>
             </div>
             <div>
               <label style={S.label}>Service Type</label>
-              <select style={{ ...S.select, width: "100%" }}><option>Installation at Shop</option><option>Pickup Only</option></select>
+              <select style={{ ...S.select, width: "100%" }} value={resService} onChange={e => setResService(e.target.value)}>
+                <option>Installation at Shop</option>
+                <option>Pickup Only</option>
+              </select>
             </div>
             <div>
               <label style={S.label}>Preferred Date</label>
-              <input type="date" style={S.input} />
+              <input type="date" style={S.input} value={resDate} onChange={e => setResDate(e.target.value)} />
             </div>
             <div>
               <label style={S.label}>Preferred Time</label>
-              <select style={{ ...S.select, width: "100%" }}>{["8:00 AM","9:00 AM","10:00 AM","11:00 AM","1:00 PM","2:00 PM","3:00 PM"].map(t => <option key={t}>{t}</option>)}</select>
+              <select style={{ ...S.select, width: "100%" }} value={resTime} onChange={e => setResTime(e.target.value)}>
+                {["8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "1:00 PM", "2:00 PM", "3:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
             <div style={{ gridColumn: "1/-1" }}>
               <label style={S.label}>Payment Option</label>
-              <select style={{ ...S.select, width: "100%" }}><option>Pay deposit online ($50)</option><option>Pay in full online</option><option>Pay at shop</option></select>
+              <select style={{ ...S.select, width: "100%" }} value={resPayment} onChange={e => setResPayment(e.target.value)}>
+                <option>Pay deposit online ($50)</option>
+                <option>Pay in full online</option>
+                <option>Pay at shop</option>
+              </select>
             </div>
             <div style={{ gridColumn: "1/-1" }}>
               <label style={S.label}>Notes</label>
-              <textarea style={{ ...S.input, height: 60, resize: "vertical" }} />
+              <textarea style={{ ...S.input, height: 60, resize: "vertical" }} value={resNotes} onChange={e => setResNotes(e.target.value)} />
             </div>
           </div>
-          <button onClick={() => { setOrderDone(true); }} style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", marginTop: 20, fontWeight: 700 }}>Reserve Tires →</button>
+          {orderError ? (
+            <div style={{ marginTop: 14, padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: COLORS.red, fontSize: 14 }}>
+              {orderError}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            disabled={orderSubmitting}
+            onClick={async () => {
+              setOrderError("");
+              const name = resName.trim();
+              const phone = resPhone.trim();
+              const email = resEmail.trim();
+              const vehicleRaw = resVehicle.trim();
+              if (!name || !phone || !email || !vehicleRaw) {
+                setOrderError("Please fill in your full name, phone, email, and vehicle.");
+                return;
+              }
+              setOrderSubmitting(true);
+              try {
+                const id = await storefrontSubmitReservation({
+                  orderTire,
+                  name,
+                  phone,
+                  email,
+                  vehicleRaw,
+                  quantity: resQuantity,
+                });
+                setSavedOrderId(id);
+                setOrderDone(true);
+              } catch (err) {
+                const msg = err?.message || err?.error_description || (typeof err === "string" ? err : "") || "Something went wrong saving your reservation. Please try again.";
+                setOrderError(msg);
+              } finally {
+                setOrderSubmitting(false);
+              }
+            }}
+            style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", marginTop: 20, fontWeight: 700, opacity: orderSubmitting ? 0.7 : 1 }}
+          >
+            {orderSubmitting ? "Saving…" : "Reserve Tires →"}
+          </button>
         </div>
       </div>
     </div>
