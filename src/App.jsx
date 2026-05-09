@@ -82,6 +82,45 @@ function tireFromSupabaseRow(row) {
   };
 }
 
+function formatOrderCreatedDate(created_at) {
+  if (!created_at) return "";
+  const d = new Date(created_at);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
+function tireLineFromOrderRow(row) {
+  const t = row.tires;
+  if (!t) return "Tire";
+  const tire = Array.isArray(t) ? t[0] : t;
+  if (!tire) return "Tire";
+  const parts = [tire.brand, tire.model, tire.size].filter(Boolean);
+  return parts.length ? parts.join(" ") : "Tire";
+}
+
+function orderFromSupabaseRow(row) {
+  const id = row.id;
+  const shortId = typeof id === "string" ? id.replace(/-/g, "").slice(0, 8) : String(id).slice(0, 8);
+  const orderLabel = shortId ? `ORD-${shortId}` : "ORD";
+  return {
+    id,
+    shop_id: row.shop_id,
+    tire_id: row.tire_id,
+    customer: row.customer_name ?? "",
+    email: row.customer_email ?? "",
+    phone: row.customer_phone ?? "",
+    tire: tireLineFromOrderRow(row),
+    qty: Number(row.quantity),
+    total: Number(row.total),
+    status: row.status ?? "Pending",
+    date: formatOrderCreatedDate(row.created_at),
+    apptDate: null,
+    vehicle: "—",
+    notes: "",
+    created_at: row.created_at,
+    orderLabel,
+  };
+}
+
 const mockOrders = [
   { id: "ORD-1042", customer: "Terrence Hall", email: "terrence@email.com", phone: "(864) 555-9021", tire: "Michelin Defender T+H 225/55R17", qty: 4, total: 579.99, status: "Pending", date: "2026-05-01", apptDate: "2026-05-05", vehicle: "2019 Toyota Camry", notes: "Customer requested morning slot" },
   { id: "ORD-1041", customer: "Angela Price", email: "angela@email.com", phone: "(864) 555-3344", tire: "Bridgestone Dueler H/L 265/70R17", qty: 2, total: 389.99, status: "Confirmed", date: "2026-04-30", apptDate: "2026-05-03", vehicle: "2021 Ford F-150", notes: "" },
@@ -841,7 +880,7 @@ function AdminSettings() {
 function ShopDashboard({ nav }) {
   const [section, setSection] = useState("overview");
   const [tires, setTires] = useState([]);
-  const [orders, setOrders] = useState(mockOrders);
+  const [orders, setOrders] = useState([]);
   const [toast, setToast] = useState(null);
   const [selectedTire, setSelectedTire] = useState(null);
 
@@ -903,8 +942,8 @@ function ShopOverview({ tires, orders }) {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 14 }}>Recent Orders</div>
-        {mockOrders.slice(0, 4).map(o => <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
-          <div><div style={{ fontSize: 14, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{o.id} · {o.tire.split(" ").slice(0, 3).join(" ")}</div></div>
+        {orders.slice(0, 4).map(o => <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
+          <div><div style={{ fontSize: 14, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{o.orderLabel || o.id} · {(o.tire || "").split(" ").slice(0, 3).join(" ")}</div></div>
           <span style={S.badge(o.status)}>{o.status}</span>
         </div>)}
       </div>
@@ -1114,9 +1153,40 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
 }
 
 function OrdersPage({ orders, setOrders, showToast }) {
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
   const filtered = filter === "All" ? orders : orders.filter(o => o.status === filter);
-  const updateStatus = (id, status) => { setOrders(os => os.map(o => o.id === id ? {...o, status} : o)); showToast(`Order ${status.toLowerCase()}`); };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setOrdersLoading(true);
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*, tires(brand, model, size)")
+        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      setOrdersLoading(false);
+      if (error) {
+        showToast(error.message);
+        return;
+      }
+      setOrders((data || []).map(orderFromSupabaseRow));
+    })();
+    return () => { cancelled = true; };
+  }, [setOrders]);
+
+  const updateStatus = async (id, status) => {
+    const { error } = await supabase.from("orders").update({ status }).eq("id", id);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    setOrders(os => os.map(o => (o.id === id ? { ...o, status } : o)));
+    showToast(`Order ${status.toLowerCase()}`);
+  };
+
   return <div>
     <div style={{ marginBottom: 20 }}>
       <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Orders</h2>
@@ -1125,11 +1195,17 @@ function OrdersPage({ orders, setOrders, showToast }) {
     <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
       {["All","Pending","Confirmed","Completed","Cancelled"].map(s => <button key={s} onClick={() => setFilter(s)} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, cursor: "pointer", border: `1px solid ${filter === s ? COLORS.blue : COLORS.gray300}`, background: filter === s ? "#EFF6FF" : "#fff", color: filter === s ? COLORS.blue : COLORS.gray600, fontWeight: filter === s ? 600 : 400 }}>{s}</button>)}
     </div>
+    {ordersLoading && (
+      <div style={{ ...S.card, padding: "48px 24px", textAlign: "center", color: COLORS.gray500, fontSize: 15 }}>
+        Loading orders…
+      </div>
+    )}
+    {!ordersLoading && (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {filtered.map(o => <div key={o.id} style={{ ...S.card, display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 16, alignItems: "center" }}>
         <div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-            <span style={{ fontWeight: 700, color: COLORS.blue }}>{o.id}</span>
+            <span style={{ fontWeight: 700, color: COLORS.blue }}>{o.orderLabel || o.id}</span>
             <span style={S.badge(o.status)}>{o.status}</span>
           </div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{o.customer}</div>
@@ -1141,7 +1217,7 @@ function OrdersPage({ orders, setOrders, showToast }) {
           {o.apptDate && <div style={{ fontSize: 12, color: COLORS.blue, marginTop: 2 }}>📅 Appt: {o.apptDate}</div>}
         </div>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.green }}>${o.total}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.green }}>${Number(o.total).toFixed(2)}</div>
           <div style={{ fontSize: 12, color: COLORS.gray400 }}>Ordered {o.date}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1150,6 +1226,7 @@ function OrdersPage({ orders, setOrders, showToast }) {
         </div>
       </div>)}
     </div>
+    )}
   </div>;
 }
 
