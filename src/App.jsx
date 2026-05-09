@@ -52,6 +52,36 @@ const mockTires = [
   { id: 6, brand: "Cooper", model: "CS5 Ultra Touring", size: "235/45R18", width: 235, aspect: 45, rim: 18, condition: "New", type: "Touring", qty: 0, price: 119.99, setPrice: 459.99, tread: null, dot: "0624", load: 98, speed: "V", status: "Out of Stock", featured: false, installFee: 25, disposalFee: 5, desc: "Comfortable touring tire with strong wet traction.", images: [] },
 ];
 
+const PLACEHOLDER_SHOP_ID = "00000000-0000-0000-0000-000000000001";
+
+function tireFromSupabaseRow(row) {
+  const price = Number(row.price);
+  const qty = Number(row.quantity);
+  return {
+    id: row.id,
+    shop_id: row.shop_id,
+    brand: row.brand ?? "",
+    model: row.model ?? "",
+    size: row.size ?? "",
+    condition: row.condition ?? "New",
+    qty,
+    price,
+    status: row.status ?? "Active",
+    created_at: row.created_at,
+    setPrice: +(price * 4).toFixed(2),
+    type: "All-Season",
+    tread: null,
+    dot: "",
+    load: 97,
+    speed: "H",
+    featured: false,
+    installFee: 25,
+    disposalFee: 5,
+    desc: "",
+    images: [],
+  };
+}
+
 const mockOrders = [
   { id: "ORD-1042", customer: "Terrence Hall", email: "terrence@email.com", phone: "(864) 555-9021", tire: "Michelin Defender T+H 225/55R17", qty: 4, total: 579.99, status: "Pending", date: "2026-05-01", apptDate: "2026-05-05", vehicle: "2019 Toyota Camry", notes: "Customer requested morning slot" },
   { id: "ORD-1041", customer: "Angela Price", email: "angela@email.com", phone: "(864) 555-3344", tire: "Bridgestone Dueler H/L 265/70R17", qty: 2, total: 389.99, status: "Confirmed", date: "2026-04-30", apptDate: "2026-05-03", vehicle: "2021 Ford F-150", notes: "" },
@@ -810,9 +840,8 @@ function AdminSettings() {
 // ── 5. SHOP DASHBOARD ─────────────────────────────────────────────────────
 function ShopDashboard({ nav }) {
   const [section, setSection] = useState("overview");
-  const [tires, setTires] = useState(mockTires);
+  const [tires, setTires] = useState([]);
   const [orders, setOrders] = useState(mockOrders);
-  const [showAddTire, setShowAddTire] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedTire, setSelectedTire] = useState(null);
 
@@ -842,7 +871,7 @@ function ShopDashboard({ nav }) {
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
         {section === "overview" && <ShopOverview tires={tires} orders={orders} />}
-        {section === "inventory" && <InventoryPage tires={tires} setTires={setTires} showAdd={showAddTire} setShowAdd={setShowAddTire} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
+        {section === "inventory" && <InventoryPage tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
         {section === "orders" && <OrdersPage orders={orders} setOrders={setOrders} showToast={showToast} />}
         {section === "appointments" && <AppointmentsPage orders={orders} />}
         {section === "customers" && <CustomersPage />}
@@ -891,17 +920,103 @@ function ShopOverview({ tires, orders }) {
 }
 
 function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTire }) {
+  const [inventoryLoading, setInventoryLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filterCondition, setFilterCondition] = useState("All");
   const [search, setSearch] = useState("");
   const [newTire, setNewTire] = useState({ brand: "", model: "", size: "", condition: "New", qty: 1, price: "", type: "All-Season", tread: "", desc: "" });
+  const [editPrice, setEditPrice] = useState("");
+  const [editSetPrice, setEditSetPrice] = useState("");
+  const [editQty, setEditQty] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setInventoryLoading(true);
+      const { data, error } = await supabase
+        .from("tires")
+        .select("*")
+        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      setInventoryLoading(false);
+      if (error) {
+        showToast(error.message);
+        return;
+      }
+      setTires((data || []).map(tireFromSupabaseRow));
+    })();
+    return () => { cancelled = true; };
+  }, [setTires]);
+
+  useEffect(() => {
+    if (!selectedTire) return;
+    setEditPrice(String(selectedTire.price));
+    setEditSetPrice(String(selectedTire.setPrice));
+    setEditQty(String(selectedTire.qty));
+  }, [selectedTire]);
+
   const filtered = tires.filter(t => (filterCondition === "All" || t.condition === filterCondition) && (t.brand + t.model + t.size).toLowerCase().includes(search.toLowerCase()));
 
-  const addTire = () => {
-    setTires(ts => [...ts, { ...newTire, id: Date.now(), qty: +newTire.qty, price: +newTire.price, status: "Active", featured: false, installFee: 25, disposalFee: 5, setPrice: (+newTire.price * 4).toFixed(2) * 1, dot: "", load: 97, speed: "H", images: [] }]);
+  const parseMoney = (v) => {
+    const n = parseFloat(String(v).replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const addTire = async () => {
+    const qty = +newTire.qty;
+    const price = +newTire.price;
+    const status = qty === 0 ? "Out of Stock" : "Active";
+    const { data, error } = await supabase
+      .from("tires")
+      .insert({
+        shop_id: PLACEHOLDER_SHOP_ID,
+        brand: newTire.brand,
+        model: newTire.model,
+        size: newTire.size,
+        condition: newTire.condition,
+        quantity: qty,
+        price,
+        status,
+      })
+      .select()
+      .single();
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    setTires(ts => [...ts, tireFromSupabaseRow(data)]);
     showToast("Tire added to inventory");
     setShowAdd(false);
     setNewTire({ brand: "", model: "", size: "", condition: "New", qty: 1, price: "", type: "All-Season", tread: "", desc: "" });
+  };
+
+  const saveTireChanges = async () => {
+    const price = parseMoney(editPrice);
+    const quantity = parseInt(String(editQty).replace(/\D/g, ""), 10) || 0;
+    const { error } = await supabase
+      .from("tires")
+      .update({ price, quantity })
+      .eq("id", selectedTire.id);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    const setPriceVal = parseMoney(editSetPrice) || +(price * 4).toFixed(2);
+    setTires(ts => ts.map(t => (t.id === selectedTire.id ? { ...t, price, qty: quantity, setPrice: setPriceVal } : t)));
+    showToast("Tire updated");
+    setSelectedTire(null);
+  };
+
+  const deleteTire = async () => {
+    const { error } = await supabase.from("tires").delete().eq("id", selectedTire.id);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    setTires(ts => ts.filter(t => t.id !== selectedTire.id));
+    showToast("Tire removed");
+    setSelectedTire(null);
   };
 
   if (selectedTire) return <div>
@@ -924,20 +1039,20 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
           <div style={{ fontWeight: 700, marginBottom: 14 }}>Pricing</div>
           <div style={{ marginBottom: 10 }}>
             <label style={S.label}>Price Per Tire</label>
-            <input style={S.input} defaultValue={`$${selectedTire.price}`} />
+            <input style={S.input} value={editPrice} onChange={e => setEditPrice(e.target.value)} />
           </div>
           <div style={{ marginBottom: 10 }}>
             <label style={S.label}>Set Price (4 tires)</label>
-            <input style={S.input} defaultValue={`$${selectedTire.setPrice}`} />
+            <input style={S.input} value={editSetPrice} onChange={e => setEditSetPrice(e.target.value)} />
           </div>
           <div style={{ marginBottom: 16 }}>
             <label style={S.label}>Quantity</label>
-            <input type="number" style={S.input} defaultValue={selectedTire.qty} />
+            <input type="number" style={S.input} value={editQty} onChange={e => setEditQty(e.target.value)} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <button onClick={() => { showToast("Tire updated"); setSelectedTire(null); }} style={{ ...S.btn("primary"), justifyContent: "center" }}>Save Changes</button>
+            <button onClick={saveTireChanges} style={{ ...S.btn("primary"), justifyContent: "center" }}>Save Changes</button>
             <button onClick={() => { setTires(ts => ts.map(t => t.id === selectedTire.id ? {...t, featured: !t.featured} : t)); showToast("Featured status updated"); }} style={{ ...S.btn("secondary"), justifyContent: "center" }}>{selectedTire.featured ? "Remove Featured" : "Mark as Featured"}</button>
-            <button onClick={() => { setTires(ts => ts.filter(t => t.id !== selectedTire.id)); showToast("Tire removed"); setSelectedTire(null); }} style={{ ...S.btn("danger"), justifyContent: "center" }}>Delete Tire</button>
+            <button onClick={deleteTire} style={{ ...S.btn("danger"), justifyContent: "center" }}>Delete Tire</button>
           </div>
         </div>
       </div>
@@ -972,7 +1087,13 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
         <button onClick={() => setShowAdd(false)} style={S.btn("secondary")}>Cancel</button>
       </div>
     </div>}
-    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden", position: "relative", minHeight: 120 }}>
+      {inventoryLoading && (
+        <div style={{ padding: "48px 24px", textAlign: "center", color: COLORS.gray500, fontSize: 15 }}>
+          Loading inventory…
+        </div>
+      )}
+      {!inventoryLoading && (
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{["Tire","Size","Cond.","Type","Qty","Price/Tire","Set Price","Status",""].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
         <tbody>{filtered.map(t => <tr key={t.id} style={{ cursor: "pointer" }}>
@@ -987,6 +1108,7 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
           <td style={S.td}><button onClick={() => setSelectedTire(t)} style={{ ...S.btn("ghost", "sm") }}>Edit</button></td>
         </tr>)}</tbody>
       </table>
+      )}
     </div>
   </div>;
 }
