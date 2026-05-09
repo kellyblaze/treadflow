@@ -52,7 +52,9 @@ const mockTires = [
   { id: 6, brand: "Cooper", model: "CS5 Ultra Touring", size: "235/45R18", width: 235, aspect: 45, rim: 18, condition: "New", type: "Touring", qty: 0, price: 119.99, setPrice: 459.99, tread: null, dot: "0624", load: 98, speed: "V", status: "Out of Stock", featured: false, installFee: 25, disposalFee: 5, desc: "Comfortable touring tire with strong wet traction.", images: [] },
 ];
 
-const PLACEHOLDER_SHOP_ID = "00000000-0000-0000-0000-000000000001";
+/** Public demo storefront resolves `shops.id` by slug; UUID fallback if row is missing (not used in the authenticated dashboard). */
+const PUBLIC_STOREFRONT_SLUG = "greenville-tire-pros";
+const FALLBACK_PUBLIC_SHOP_ID = "00000000-0000-0000-0000-000000000001";
 
 function tireFromSupabaseRow(row) {
   const price = Number(row.price);
@@ -936,21 +938,78 @@ function ShopDashboard({ nav }) {
   const [orders, setOrders] = useState([]);
   const [toast, setToast] = useState(null);
   const [selectedTire, setSelectedTire] = useState(null);
+  const [shopRecord, setShopRecord] = useState(null);
+  const [shopLoading, setShopLoading] = useState(true);
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2800); };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setShopLoading(true);
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (userErr || !user?.email) {
+        setShopRecord(null);
+        setShopLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("shops")
+        .select("id, name, owner_name, email, city, state, status, plan, slug")
+        .eq("email", user.email)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.warn("Shop lookup failed:", error);
+        setShopRecord(null);
+      } else {
+        setShopRecord(data);
+      }
+      setShopLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const shopId = shopRecord?.id ?? null;
+  const shopInitial = ((shopRecord?.name || "?").trim().charAt(0) || "?").toUpperCase();
+  const shopLocationLine = shopRecord ? [shopRecord.city, shopRecord.state].filter(Boolean).join(", ") : "";
 
   const sidebar = [
     ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
   ];
+
+  if (shopLoading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: COLORS.gray50, color: COLORS.gray600 }}>
+        Loading shop…
+      </div>
+    );
+  }
+
+  if (!shopRecord) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: COLORS.gray50 }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: "40px 48px", maxWidth: 440, textAlign: "center", border: `1px solid ${COLORS.gray200}` }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>🏪</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 12px", color: COLORS.gray900 }}>Shop not found</h2>
+          <p style={{ color: COLORS.gray500, fontSize: 15, lineHeight: 1.6, margin: "0 0 24px" }}>We could not find a tire shop linked to your login email in <code style={{ fontSize: 13, background: COLORS.gray100, padding: "2px 6px", borderRadius: 4 }}>shops.email</code>. Contact support if you believe this is an error.</p>
+          <button type="button" onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>
+            Log out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif", background: COLORS.gray50, position: "relative" }}>
       {toast && <div style={{ position: "fixed", bottom: 24, right: 24, background: COLORS.gray900, color: "#fff", padding: "12px 20px", borderRadius: 10, fontSize: 14, zIndex: 999 }}>{toast}</div>}
       <div style={{ width: 220, background: "#0A1628", padding: "20px 12px", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 8px 24px" }}>
-          <div style={{ width: 30, height: 30, background: COLORS.blue, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#fff", fontSize: 14 }}>G</div>
-          <div>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 13 }}>Greenville Tire Pros</div>
+          <div style={{ width: 30, height: 30, background: COLORS.blue, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#fff", fontSize: 14 }}>{shopInitial}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, lineHeight: 1.25 }} title={shopRecord.name}>{shopRecord.name}</div>
             <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>Shop Dashboard</div>
           </div>
         </div>
@@ -962,11 +1021,11 @@ function ShopDashboard({ nav }) {
         </div>
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
-        {section === "overview" && <ShopOverview tires={tires} orders={orders} />}
-        {section === "inventory" && <InventoryPage tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
-        {section === "orders" && <OrdersPage orders={orders} setOrders={setOrders} showToast={showToast} />}
-        {section === "appointments" && <AppointmentsPage showToast={showToast} />}
-        {section === "customers" && <CustomersPage showToast={showToast} />}
+        {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={shopRecord.name} shopLocation={shopLocationLine} />}
+        {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
+        {section === "orders" && <OrdersPage shopId={shopId} orders={orders} setOrders={setOrders} showToast={showToast} />}
+        {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
+        {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "billing" && <ShopBilling />}
@@ -975,16 +1034,17 @@ function ShopDashboard({ nav }) {
   );
 }
 
-function ShopOverview({ tires, orders }) {
+function ShopOverview({ tires, orders, shopName, shopLocation }) {
   const pending = orders.filter(o => o.status === "Pending").length;
   const confirmed = orders.filter(o => o.status === "Confirmed").length;
   const completed = orders.filter(o => o.status === "Completed").length;
   const lowStock = tires.filter(t => t.qty > 0 && t.qty <= 2).length;
   const revenue = orders.filter(o => o.status !== "Cancelled").reduce((a, o) => a + o.total, 0);
+  const sub = [shopName, shopLocation].filter(Boolean).join(shopLocation ? " · " : "");
   return <div>
     <div style={{ marginBottom: 24 }}>
       <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Dashboard</h2>
-      <p style={{ color: COLORS.gray500, marginTop: 4 }}>Greenville Tire Pros · Greenville, SC</p>
+      <p style={{ color: COLORS.gray500, marginTop: 4 }}>{sub}</p>
     </div>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 }}>
       <MetricCard label="Total Tires" value={tires.reduce((a, t) => a + t.qty, 0)} />
@@ -1011,7 +1071,7 @@ function ShopOverview({ tires, orders }) {
   </div>;
 }
 
-function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTire }) {
+function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSelectedTire }) {
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filterCondition, setFilterCondition] = useState("All");
@@ -1022,13 +1082,14 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
   const [editQty, setEditQty] = useState("");
 
   useEffect(() => {
+    if (!shopId) return;
     let cancelled = false;
     (async () => {
       setInventoryLoading(true);
       const { data, error } = await supabase
         .from("tires")
         .select("*")
-        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .eq("shop_id", shopId)
         .order("created_at", { ascending: false });
       if (cancelled) return;
       setInventoryLoading(false);
@@ -1039,7 +1100,7 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
       setTires((data || []).map(tireFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, [setTires]);
+  }, [shopId, setTires, showToast]);
 
   useEffect(() => {
     if (!selectedTire) return;
@@ -1062,7 +1123,7 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
     const { data, error } = await supabase
       .from("tires")
       .insert({
-        shop_id: PLACEHOLDER_SHOP_ID,
+        shop_id: shopId,
         brand: newTire.brand,
         model: newTire.model,
         size: newTire.size,
@@ -1205,19 +1266,20 @@ function InventoryPage({ tires, setTires, showToast, selectedTire, setSelectedTi
   </div>;
 }
 
-function OrdersPage({ orders, setOrders, showToast }) {
+function OrdersPage({ shopId, orders, setOrders, showToast }) {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
   const filtered = filter === "All" ? orders : orders.filter(o => o.status === filter);
 
   useEffect(() => {
+    if (!shopId) return;
     let cancelled = false;
     (async () => {
       setOrdersLoading(true);
       const { data, error } = await supabase
         .from("orders")
         .select("*, tires(brand, model, size)")
-        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .eq("shop_id", shopId)
         .order("created_at", { ascending: false });
       if (cancelled) return;
       setOrdersLoading(false);
@@ -1228,7 +1290,7 @@ function OrdersPage({ orders, setOrders, showToast }) {
       setOrders((data || []).map(orderFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, [setOrders]);
+  }, [shopId, setOrders, showToast]);
 
   const updateStatus = async (id, status) => {
     const { error } = await supabase.from("orders").update({ status }).eq("id", id);
@@ -1283,18 +1345,19 @@ function OrdersPage({ orders, setOrders, showToast }) {
   </div>;
 }
 
-function AppointmentsPage({ showToast }) {
+function AppointmentsPage({ shopId, showToast }) {
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointments, setAppointments] = useState([]);
 
   useEffect(() => {
+    if (!shopId) return;
     let cancelled = false;
     (async () => {
       setAppointmentsLoading(true);
       const { data, error } = await supabase
         .from("appointments")
         .select("*, customers(name, phone, email)")
-        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .eq("shop_id", shopId)
         .order("date", { ascending: false });
       if (cancelled) return;
       setAppointmentsLoading(false);
@@ -1305,7 +1368,7 @@ function AppointmentsPage({ showToast }) {
       setAppointments((data || []).map(appointmentFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [shopId, showToast]);
 
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Appointments</h2>
@@ -1342,18 +1405,19 @@ function AppointmentsPage({ showToast }) {
   </div>;
 }
 
-function CustomersPage({ showToast }) {
+function CustomersPage({ shopId, showToast }) {
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customers, setCustomers] = useState([]);
 
   useEffect(() => {
+    if (!shopId) return;
     let cancelled = false;
     (async () => {
       setCustomersLoading(true);
       const { data, error } = await supabase
         .from("customers")
         .select("*")
-        .eq("shop_id", PLACEHOLDER_SHOP_ID)
+        .eq("shop_id", shopId)
         .order("created_at", { ascending: false });
       if (cancelled) return;
       setCustomersLoading(false);
@@ -1364,7 +1428,7 @@ function CustomersPage({ showToast }) {
       setCustomers((data || []).map(customerFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [shopId, showToast]);
 
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Customers</h2>
@@ -1478,7 +1542,7 @@ function parseVehicleFields(vehicleRaw) {
   return { vehicle_year, vehicle_make, vehicle_model };
 }
 
-async function storefrontSubmitReservation({
+async function storefrontSubmitReservation(shopId, {
   orderTire,
   name,
   phone,
@@ -1486,6 +1550,7 @@ async function storefrontSubmitReservation({
   vehicleRaw,
   quantity,
 }) {
+  if (!shopId) throw new Error("Missing shop.");
   const qty = Math.max(1, Math.min(99, parseInt(String(quantity), 10) || 1));
   const total = +(qty * Number(orderTire.price)).toFixed(2);
   const { vehicle_year, vehicle_make, vehicle_model } = parseVehicleFields(vehicleRaw);
@@ -1493,14 +1558,14 @@ async function storefrontSubmitReservation({
   const { data: existingCustomer, error: findErr } = await supabase
     .from("customers")
     .select("id")
-    .eq("shop_id", PLACEHOLDER_SHOP_ID)
+    .eq("shop_id", shopId)
     .eq("email", email)
     .maybeSingle();
   if (findErr) throw findErr;
 
   if (!existingCustomer) {
     const { error: custErr } = await supabase.from("customers").insert({
-      shop_id: PLACEHOLDER_SHOP_ID,
+      shop_id: shopId,
       name,
       phone,
       email,
@@ -1514,7 +1579,7 @@ async function storefrontSubmitReservation({
   const { data: orderRow, error: orderErr } = await supabase
     .from("orders")
     .insert({
-      shop_id: PLACEHOLDER_SHOP_ID,
+      shop_id: shopId,
       customer_name: name,
       customer_email: email,
       customer_phone: phone,
@@ -1530,6 +1595,21 @@ async function storefrontSubmitReservation({
 
 // ── 6. PUBLIC STOREFRONT ──────────────────────────────────────────────────
 function Storefront({ nav }) {
+  const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("shops")
+      .select("id")
+      .eq("slug", PUBLIC_STOREFRONT_SLUG)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data?.id) setPublicShopId(data.id);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const [search, setSearch] = useState("");
   const [condFilter, setCondFilter] = useState("All");
   const [selectedTire, setSelectedTire] = useState(null);
@@ -1674,7 +1754,7 @@ function Storefront({ nav }) {
               }
               setOrderSubmitting(true);
               try {
-                const id = await storefrontSubmitReservation({
+                const id = await storefrontSubmitReservation(publicShopId, {
                   orderTire,
                   name,
                   phone,
