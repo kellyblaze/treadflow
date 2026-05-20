@@ -1101,7 +1101,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       setTires((data || []).map(tireFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, [shopId, setTires, showToast]);
+ }, [shopId]);
 
   useEffect(() => {
     if (!selectedTire) return;
