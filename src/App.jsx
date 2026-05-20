@@ -272,9 +272,9 @@ function LandingPage({ nav }) {
     { icon: "🎨", title: "Custom Storefront Design", desc: "Your storefront built and styled to match your brand — not a generic template." },
   ];
   const localPlans = [
-    { name: "Early Partner", price: 149, highlight: false, paymentLink: "https://buy.stripe.com/test_5kQbJ033hcZd4333v68so00", features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
-    { name: "Growth Partner", price: 249, highlight: true, paymentLink: "https://buy.stripe.com/test_eVq00i47l9N17ff6Hi8so01", features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
-    { name: "Market Leader", price: 399, highlight: false, paymentLink: "https://buy.stripe.com/test_28EdR85bp3oDczze9K8so02", features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
+    { name: "Early Partner", price: 149, highlight: false, paymentLink: "https://buy.stripe.com/7sY8wJ3IDbYS75H5Je4Rq00", features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
+    { name: "Growth Partner", price: 249, highlight: true, paymentLink: "https://buy.stripe.com/00w4gt2Ezgf83Tvb3y4Rq01", features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
+    { name: "Market Leader", price: 399, highlight: false, paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02", features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
   ];
   const faqs = [
     ["Is TreadFlow open to any tire shop?", "No. TreadFlow is invite-only. We review each applicant for market fit and shop readiness before granting access."],
