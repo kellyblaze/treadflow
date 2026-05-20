@@ -1270,7 +1270,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
 function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast }) {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
-  const filtered = filter === "All" ? orders : orders.filter(o => o.status === filter);
+  const filtered = filter === "All" ? orders : orders.filter(o => o.status.toLowerCase() === filter.toLowerCase());
 
   useEffect(() => {
     if (!shopId) return;
