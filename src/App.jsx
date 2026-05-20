@@ -1345,7 +1345,8 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
           <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.green }}>${Number(o.total).toFixed(2)}</div>
           <div style={{ fontSize: 12, color: COLORS.gray400 }}>Ordered {o.date}</div>
         </div>
-{(o.status === "Pending" || o.status === "pending") && <><button onClick={() => updateStatus(o.id, "Confirmed")} style={{ ...S.btn("primary", "sm"), justifyContent: "center" }}>Confirm</button><button onClick={() => updateStatus(o.id, "Cancelled")} style={{ ...S.btn("danger", "sm"), justifyContent: "center" }}>Cancel</button></>}
+        <div>
+          {(o.status === "Pending" || o.status === "pending") && <><button onClick={() => updateStatus(o.id, "Confirmed")} style={{ ...S.btn("primary", "sm"), justifyContent: "center" }}>Confirm</button><button onClick={() => updateStatus(o.id, "Cancelled")} style={{ ...S.btn("danger", "sm"), justifyContent: "center" }}>Cancel</button></>}
           {o.status === "Confirmed" && <button onClick={() => updateStatus(o.id, "Completed")} style={{ ...S.btn("primary", "sm"), justifyContent: "center" }}>Mark Complete</button>}
         </div>
       </div>)}
