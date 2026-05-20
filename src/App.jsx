@@ -1036,7 +1036,7 @@ function ShopDashboard({ nav }) {
 }
 
 function ShopOverview({ tires, orders, shopName, shopLocation }) {
-  const pending = orders.filter(o => o.status === "Pending").length;
+  const pending = orders.filter(o => o.status === Pending || o.status === pending").length;
   const confirmed = orders.filter(o => o.status === "Confirmed").length;
   const completed = orders.filter(o => o.status === "Completed").length;
   const lowStock = tires.filter(t => t.qty > 0 && t.qty <= 2).length;
@@ -1346,7 +1346,7 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
           <div style={{ fontSize: 12, color: COLORS.gray400 }}>Ordered {o.date}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {o.status === "Pending" && <><button onClick={() => updateStatus(o.id, "Confirmed")} style={{ ...S.btn("primary", "sm"), justifyContent: "center" }}>Confirm</button><button onClick={() => updateStatus(o.id, "Cancelled")} style={{ ...S.btn("danger", "sm"), justifyContent: "center" }}>Cancel</button></>}
+          {o.status === Pending || o.status === pending" && <><button onClick={() => updateStatus(o.id, "Confirmed")} style={{ ...S.btn("primary", "sm"), justifyContent: "center" }}>Confirm</button><button onClick={() => updateStatus(o.id, "Cancelled")} style={{ ...S.btn("danger", "sm"), justifyContent: "center" }}>Cancel</button></>}
           {o.status === "Confirmed" && <button onClick={() => updateStatus(o.id, "Completed")} style={{ ...S.btn("primary", "sm"), justifyContent: "center" }}>Mark Complete</button>}
         </div>
       </div>)}
