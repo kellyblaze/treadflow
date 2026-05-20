@@ -1279,7 +1279,7 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
       setOrdersLoading(true);
       const { data, error } = await supabase
         .from("orders")
-        .select("*, tires(brand, model, size)")
+        .select("*")
         .eq("shop_id", shopId)
         .order("created_at", { ascending: false });
       if (cancelled) return;
