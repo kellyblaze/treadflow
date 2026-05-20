@@ -1036,7 +1036,7 @@ function ShopDashboard({ nav }) {
 }
 
 function ShopOverview({ tires, orders, shopName, shopLocation }) {
-  const pending = orders.filter(o => o.status === Pending || o.status === pending").length;
+  const pending = orders.filter(o => o.status === "Pending" || o.status === "pending").length;
   const confirmed = orders.filter(o => o.status === "Confirmed").length;
   const completed = orders.filter(o => o.status === "Completed").length;
   const lowStock = tires.filter(t => t.qty > 0 && t.qty <= 2).length;
