@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import { sendEmail, reservationConfirmation, orderNotification, orderStatusUpdate } from "./email";
 const redirectToCheckout = (paymentLink) => {
   console.log("Redirecting to:", paymentLink);
   if (!paymentLink) { alert("No payment link found!"); return; }
@@ -1023,7 +1024,7 @@ function ShopDashboard({ nav }) {
       <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
         {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={shopRecord.name} shopLocation={shopLocationLine} />}
         {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
-        {section === "orders" && <OrdersPage shopId={shopId} orders={orders} setOrders={setOrders} showToast={showToast} />}
+        {section === "orders" && <OrdersPage shopId={shopId} shopName={shopRecord.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
@@ -1266,7 +1267,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   </div>;
 }
 
-function OrdersPage({ shopId, orders, setOrders, showToast }) {
+function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast }) {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
   const filtered = filter === "All" ? orders : orders.filter(o => o.status === filter);
@@ -1290,9 +1291,10 @@ function OrdersPage({ shopId, orders, setOrders, showToast }) {
       setOrders((data || []).map(orderFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, [shopId, setOrders, showToast]);
+  }, [shopId]);
 
   const updateStatus = async (id, status) => {
+    const order = orders.find(o => o.id === id);
     const { error } = await supabase.from("orders").update({ status }).eq("id", id);
     if (error) {
       showToast(error.message);
@@ -1300,6 +1302,14 @@ function OrdersPage({ shopId, orders, setOrders, showToast }) {
     }
     setOrders(os => os.map(o => (o.id === id ? { ...o, status } : o)));
     showToast(`Order ${status.toLowerCase()}`);
+    if (order?.email && (status === "Confirmed" || status === "Completed")) {
+      try {
+        const { subject, html } = orderStatusUpdate(order.customer, order.tire, status, shopName || "Your tire shop", shopPhone || "");
+        await sendEmail(order.email, subject, html);
+      } catch (e) {
+        console.warn("order status email:", e);
+      }
+    }
   };
 
   return <div>
@@ -1356,7 +1366,7 @@ function AppointmentsPage({ shopId, showToast }) {
       setAppointmentsLoading(true);
       const { data, error } = await supabase
         .from("appointments")
-        .select("*, customers(name, phone, email)")
+        .select("id, shop_id, customer_id, order_id, date, time, status, vehicle_info, notes, created_at")
         .eq("shop_id", shopId)
         .order("date", { ascending: false });
       if (cancelled) return;
@@ -1368,7 +1378,7 @@ function AppointmentsPage({ shopId, showToast }) {
       setAppointments((data || []).map(appointmentFromSupabaseRow));
     })();
     return () => { cancelled = true; };
-  }, [shopId, showToast]);
+  }, [shopId]);
 
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Appointments</h2>
@@ -1596,16 +1606,22 @@ async function storefrontSubmitReservation(shopId, {
 // ── 6. PUBLIC STOREFRONT ──────────────────────────────────────────────────
 function Storefront({ nav }) {
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
+  const [publicShopInfo, setPublicShopInfo] = useState({ name: storefront.name, email: "" });
 
   useEffect(() => {
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id")
+      .select("id, name, email")
       .eq("slug", PUBLIC_STOREFRONT_SLUG)
       .maybeSingle()
       .then(({ data }) => {
-        if (!cancelled && data?.id) setPublicShopId(data.id);
+        if (cancelled || !data?.id) return;
+        setPublicShopId(data.id);
+        setPublicShopInfo({
+          name: data.name || storefront.name,
+          email: (data.email || "").trim(),
+        });
       });
     return () => { cancelled = true; };
   }, []);
@@ -1763,6 +1779,23 @@ function Storefront({ nav }) {
                   quantity: resQuantity,
                 });
                 setSavedOrderId(id);
+                const tireName = `${orderTire.brand} ${orderTire.model}`;
+                const qtyNum = Math.max(1, Math.min(99, parseInt(String(resQuantity), 10) || 1));
+                const totalStr = +(qtyNum * Number(orderTire.price)).toFixed(2);
+                try {
+                  const custTpl = reservationConfirmation(name, tireName, publicShopInfo.name, storefront.phone);
+                  await sendEmail(email, custTpl.subject, custTpl.html);
+                } catch (e) {
+                  console.warn("Reservation confirmation email:", e);
+                }
+                if (publicShopInfo.email) {
+                  try {
+                    const shopTpl = orderNotification(name, tireName, qtyNum, totalStr);
+                    await sendEmail(publicShopInfo.email, shopTpl.subject, shopTpl.html);
+                  } catch (e) {
+                    console.warn("Shop order notification email:", e);
+                  }
+                }
                 setOrderDone(true);
               } catch (err) {
                 const msg = err?.message || err?.error_description || (typeof err === "string" ? err : "") || "Something went wrong saving your reservation. Please try again.";
