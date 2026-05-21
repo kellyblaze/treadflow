@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabase";
 import { sendEmail, reservationConfirmation, orderNotification, orderStatusUpdate } from "./email";
 const redirectToCheckout = (paymentLink) => {
@@ -280,6 +280,41 @@ function useWindowWidth() {
 
 function gridCols(desktop, isMobile) {
   return isMobile ? "1fr" : desktop;
+}
+
+function getSpeechRecognitionCtor() {
+  if (typeof window === "undefined") return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function tireFormFromParsedJson(parsed) {
+  const condition = String(parsed?.condition ?? "").toLowerCase() === "used" ? "Used" : "New";
+  const qtyNum = Number(parsed?.quantity ?? parsed?.qty ?? 0);
+  const priceNum = Number(parsed?.price ?? 0);
+  return {
+    brand: String(parsed?.brand ?? ""),
+    model: String(parsed?.model ?? ""),
+    size: String(parsed?.size ?? ""),
+    condition,
+    qty: qtyNum > 0 ? qtyNum : 1,
+    price: priceNum > 0 ? String(priceNum) : "",
+    type: "All-Season",
+    tread: "",
+    desc: "",
+  };
+}
+
+async function parseTireTranscript(transcript) {
+  const res = await fetch("/api/parse-tire", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `Failed to parse tire details (${res.status})`);
+  }
+  return data;
 }
 
 // ── Components ────────────────────────────────────────────────────────────
@@ -1210,12 +1245,164 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const isMobile = useWindowWidth() < 768;
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("Tap to speak");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceError, setVoiceError] = useState("");
+  const [voiceSupported, setVoiceSupported] = useState(true);
   const [filterCondition, setFilterCondition] = useState("All");
   const [search, setSearch] = useState("");
   const [newTire, setNewTire] = useState({ brand: "", model: "", size: "", condition: "New", qty: 1, price: "", type: "All-Season", tread: "", desc: "" });
   const [editPrice, setEditPrice] = useState("");
   const [editSetPrice, setEditSetPrice] = useState("");
   const [editQty, setEditQty] = useState("");
+
+  const recognitionRef = useRef(null);
+  const listeningRef = useRef(false);
+  const silenceTimerRef = useRef(null);
+  const transcriptRef = useRef("");
+  const skipProcessOnEndRef = useRef(false);
+  const [isListening, setIsListening] = useState(false);
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  const stopVoiceListening = useCallback((skipProcess = false) => {
+    if (skipProcess) skipProcessOnEndRef.current = true;
+    clearSilenceTimer();
+    listeningRef.current = false;
+    setIsListening(false);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+  }, [clearSilenceTimer]);
+
+  const closeVoiceModal = useCallback(() => {
+    stopVoiceListening(true);
+    setShowVoiceModal(false);
+    setVoiceStatus("Tap to speak");
+    setVoiceTranscript("");
+    setVoiceError("");
+    transcriptRef.current = "";
+  }, [stopVoiceListening]);
+
+  const processVoiceTranscript = useCallback(async (text) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setVoiceStatus("Tap to speak");
+      setVoiceError("No speech detected. Try again.");
+      return;
+    }
+    setVoiceStatus("Processing...");
+    setVoiceError("");
+    try {
+      const parsed = await parseTireTranscript(trimmed);
+      setNewTire(tireFormFromParsedJson(parsed));
+      closeVoiceModal();
+      setShowAdd(true);
+      showToast("Review pre-filled tire details before saving");
+    } catch (err) {
+      setVoiceError(err?.message || "Could not parse tire details. Use the transcript below and enter manually.");
+      setShowAdd(true);
+      setNewTire(t => ({ ...t, desc: trimmed }));
+    }
+  }, [closeVoiceModal, showToast]);
+
+  const startVoiceListening = useCallback(() => {
+    const SpeechRecognition = getSpeechRecognitionCtor();
+    if (!SpeechRecognition) {
+      setVoiceSupported(false);
+      setVoiceError("Voice input not supported on this browser");
+      return;
+    }
+    setVoiceError("");
+    transcriptRef.current = voiceTranscript;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognitionRef.current = recognition;
+
+    recognition.onresult = (event) => {
+      let chunk = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        chunk += event.results[i][0].transcript;
+      }
+      transcriptRef.current = `${transcriptRef.current}${chunk}`.trim();
+      setVoiceTranscript(transcriptRef.current);
+      clearSilenceTimer();
+      silenceTimerRef.current = setTimeout(() => {
+        if (listeningRef.current) stopVoiceListening();
+      }, 5000);
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error !== "aborted") {
+        setVoiceError(event.error === "not-allowed" ? "Microphone permission denied" : `Speech error: ${event.error}`);
+      }
+      listeningRef.current = false;
+      setIsListening(false);
+      setVoiceStatus("Tap to speak");
+      clearSilenceTimer();
+    };
+
+    recognition.onend = () => {
+      listeningRef.current = false;
+      setIsListening(false);
+      clearSilenceTimer();
+      if (skipProcessOnEndRef.current) {
+        skipProcessOnEndRef.current = false;
+        setVoiceStatus("Tap to speak");
+        return;
+      }
+      const finalText = transcriptRef.current.trim();
+      if (finalText) {
+        processVoiceTranscript(finalText);
+      } else {
+        setVoiceStatus("Tap to speak");
+      }
+    };
+
+    try {
+      recognition.start();
+      listeningRef.current = true;
+      setIsListening(true);
+      setVoiceStatus("Listening...");
+    } catch {
+      setVoiceError("Could not start voice recognition");
+      setVoiceStatus("Tap to speak");
+      setIsListening(false);
+    }
+  }, [clearSilenceTimer, stopVoiceListening, processVoiceTranscript]);
+
+  const toggleVoiceMic = useCallback(() => {
+    if (!voiceSupported) return;
+    if (listeningRef.current) {
+      stopVoiceListening();
+      return;
+    }
+    startVoiceListening();
+  }, [voiceSupported, startVoiceListening, stopVoiceListening]);
+
+  const openVoiceModal = useCallback(() => {
+    const supported = !!getSpeechRecognitionCtor();
+    setVoiceSupported(supported);
+    setVoiceStatus("Tap to speak");
+    setVoiceTranscript("");
+    setVoiceError(supported ? "" : "Voice input not supported on this browser");
+    transcriptRef.current = "";
+    setShowVoiceModal(true);
+  }, []);
+
+  useEffect(() => () => stopVoiceListening(), [stopVoiceListening]);
 
   useEffect(() => {
     if (!shopId) return;
@@ -1351,11 +1538,70 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   return <div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <div><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Inventory</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>{tires.reduce((a, t) => a + t.qty, 0)} total tires in stock</p></div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={() => showToast("CSV upload dialog opened")} style={S.btn("secondary")}>📤 CSV Upload</button>
-        <button onClick={() => setShowAdd(true)} style={S.btn("primary")}>+ Add Tire</button>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <button type="button" onClick={() => showToast("CSV upload dialog opened")} style={S.btn("secondary")}>📤 CSV Upload</button>
+        <button type="button" onClick={openVoiceModal} style={S.btn("secondary")}>🎤 Voice Add</button>
+        <button type="button" onClick={() => setShowAdd(true)} style={S.btn("primary")}>+ Add Tire</button>
       </div>
     </div>
+    {showVoiceModal && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="voice-add-title"
+        style={{ position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}
+        onClick={e => { if (e.target === e.currentTarget && voiceStatus !== "Processing...") closeVoiceModal(); }}
+      >
+        <div style={{ background: "#fff", borderRadius: 16, padding: "32px 28px", maxWidth: 420, width: "100%", textAlign: "center", boxShadow: "0 20px 50px rgba(0,0,0,0.2)" }}>
+          <h3 id="voice-add-title" style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700, color: COLORS.gray900 }}>Voice Add Tire</h3>
+          <p style={{ margin: "0 0 24px", fontSize: 14, color: COLORS.gray500 }}>Describe the tire — brand, model, size, condition, quantity, and price.</p>
+          <button
+            type="button"
+            onClick={toggleVoiceMic}
+            disabled={!voiceSupported || voiceStatus === "Processing..."}
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: "50%",
+              border: "none",
+              background: isListening ? COLORS.red : COLORS.blue,
+              color: "#fff",
+              fontSize: 40,
+              cursor: !voiceSupported || voiceStatus === "Processing..." ? "not-allowed" : "pointer",
+              margin: "0 auto 16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: !voiceSupported || voiceStatus === "Processing..." ? 0.6 : 1,
+            }}
+          >
+            🎤
+          </button>
+          <div style={{ fontSize: 15, fontWeight: 600, color: voiceStatus === "Listening..." ? COLORS.blue : COLORS.gray700, marginBottom: 16 }}>
+            {voiceStatus}
+          </div>
+          <div style={{ background: COLORS.gray50, borderRadius: 10, border: `1px solid ${COLORS.gray200}`, padding: "14px 16px", minHeight: 72, textAlign: "left", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.gray400, marginBottom: 6, textTransform: "uppercase" }}>Transcript</div>
+            <div style={{ fontSize: 14, color: voiceTranscript ? COLORS.gray800 : COLORS.gray400, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+              {voiceTranscript || "Your words will appear here…"}
+            </div>
+          </div>
+          {voiceError && (
+            <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "12px 14px", fontSize: 13, color: COLORS.red, textAlign: "left", marginBottom: 16, lineHeight: 1.5 }}>
+              {voiceError}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={closeVoiceModal}
+            disabled={voiceStatus === "Processing..."}
+            style={{ ...S.btn("secondary"), width: "100%", justifyContent: "center", opacity: voiceStatus === "Processing..." ? 0.6 : 1 }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )}
     <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
       <input style={{ ...S.input, maxWidth: 260 }} placeholder="Search brand, model, size..." value={search} onChange={e => setSearch(e.target.value)} />
       {["All","New","Used"].map(c => <button key={c} onClick={() => setFilterCondition(c)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer", border: `1px solid ${filterCondition === c ? COLORS.blue : COLORS.gray300}`, background: filterCondition === c ? "#EFF6FF" : "#fff", color: filterCondition === c ? COLORS.blue : COLORS.gray600, fontWeight: filterCondition === c ? 600 : 400 }}>{c}</button>)}
