@@ -199,6 +199,12 @@ const mockMarkets = [
   { id: 5, city: "Raleigh", state: "NC", name: "Triangle Area", max: 4, active: 1, status: "Open" },
 ];
 
+const LOCAL_PLANS = [
+  { name: "Early Partner", price: 149, highlight: false, paymentLink: "https://buy.stripe.com/7sY8wJ3IDbYS75H5Je4Rq00", features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
+  { name: "Growth Partner", price: 249, highlight: true, paymentLink: "https://buy.stripe.com/00w4gt2Ezgf83Tvb3y4Rq01", features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
+  { name: "Market Leader", price: 399, highlight: false, paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02", features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
+];
+
 const storefront = {
   logo: "G",
   name: "Greenville Tire Pros",
@@ -287,11 +293,6 @@ function LandingPage({ nav }) {
     { icon: "📱", title: "Customer Notifications", desc: "Automated email (and SMS) updates on order status, appointment reminders, and confirmations." },
     { icon: "🎨", title: "Custom Storefront Design", desc: "Your storefront built and styled to match your brand — not a generic template." },
   ];
-  const localPlans = [
-    { name: "Early Partner", price: 149, highlight: false, paymentLink: "https://buy.stripe.com/7sY8wJ3IDbYS75H5Je4Rq00", features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
-    { name: "Growth Partner", price: 249, highlight: true, paymentLink: "https://buy.stripe.com/00w4gt2Ezgf83Tvb3y4Rq01", features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
-    { name: "Market Leader", price: 399, highlight: false, paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02", features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
-  ];
   const faqs = [
     ["Is TreadFlow open to any tire shop?", "No. TreadFlow is invite-only. We review each applicant for market fit and shop readiness before granting access."],
     ["How does the invite process work?", "Submit an application. Our team reviews your market and shop fit. If approved, you receive a private invite link to create your account."],
@@ -357,7 +358,7 @@ function LandingPage({ nav }) {
           <p style={{ color: COLORS.gray500 }}>Plans are assigned after your application is reviewed and approved.</p>
         </div>
         <div style={{ display: "flex", gap: 24, justifyContent: "center", flexWrap: "wrap", maxWidth: 1000, margin: "0 auto" }}>
-          {localPlans.map(p => <div key={p.name} style={{ flex: "1 1 280px", maxWidth: 320, borderRadius: 16, border: p.highlight ? `2px solid ${COLORS.blue}` : "1px solid #E2E8F0", padding: "32px 28px", background: p.highlight ? "#F0F7FF" : "#fff", position: "relative" }}>
+          {LOCAL_PLANS.map(p => <div key={p.name} style={{ flex: "1 1 280px", maxWidth: 320, borderRadius: 16, border: p.highlight ? `2px solid ${COLORS.blue}` : "1px solid #E2E8F0", padding: "32px 28px", background: p.highlight ? "#F0F7FF" : "#fff", position: "relative" }}>
             {p.highlight && <div style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: COLORS.blue, color: "#fff", fontSize: 12, fontWeight: 700, padding: "4px 14px", borderRadius: 99 }}>Most Popular</div>}
             <div style={{ fontWeight: 800, fontSize: 18, color: COLORS.gray900, marginBottom: 4 }}>{p.name}</div>
             <div style={{ fontSize: 40, fontWeight: 800, color: p.highlight ? COLORS.blue : COLORS.gray900 }}>${p.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
@@ -1015,6 +1016,17 @@ function ShopDashboard({ nav }) {
     ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
   ];
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    nav("login");
+  };
+
+  const mobileNavItems = [
+    ...sidebar.map(([id, icon, label]) => ({ id, icon, label: label.split(" ")[0], kind: "section" })),
+    { id: "storefront", icon: "🌐", label: "Store", kind: "storefront" },
+    { id: "logout", icon: "🚪", label: "Out", kind: "logout" },
+  ];
+
   if (shopLoading) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: COLORS.gray50, color: COLORS.gray600 }}>
@@ -1063,6 +1075,15 @@ function ShopDashboard({ nav }) {
       </div>
       )}
       <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "16px 16px 88px" : 28 }}>
+        {isMobile && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${COLORS.gray200}` }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.25 }} title={shopRecord.name}>{shopRecord.name}</div>
+              <div style={{ fontSize: 12, color: COLORS.gray500 }}>Shop Dashboard</div>
+            </div>
+            <button type="button" onClick={handleLogout} style={{ ...S.btn("secondary", "sm"), flexShrink: 0 }}>Logout</button>
+          </div>
+        )}
         {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={shopRecord.name} shopLocation={shopLocationLine} />}
         {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
         {section === "orders" && <OrdersPage shopId={shopId} shopName={shopRecord.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
@@ -1070,21 +1091,45 @@ function ShopDashboard({ nav }) {
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
-        {section === "billing" && <ShopBilling />}
+        {section === "billing" && <ShopBilling plan={shopRecord.plan} status={shopRecord.status} />}
       </div>
       {isMobile && (
-        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#0A1628", borderTop: "1px solid rgba(255,255,255,0.1)", display: "flex", justifyContent: "space-around", alignItems: "center", padding: "8px 4px max(8px, env(safe-area-inset-bottom))", zIndex: 100 }}>
-          {sidebar.map(([id, icon]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => { setSection(id); setSelectedTire(null); }}
-              title={id}
-              style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: section === id ? "#1E3A5F" : "transparent", border: "none", borderRadius: 10, padding: "10px 4px", cursor: "pointer", fontSize: 22 }}
-            >
-              {icon}
-            </button>
-          ))}
+        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#0A1628", borderTop: "1px solid rgba(255,255,255,0.1)", zIndex: 100, paddingBottom: "max(6px, env(safe-area-inset-bottom))" }}>
+          <div style={{ display: "flex", overflowX: "auto", WebkitOverflowScrolling: "touch", gap: 2, padding: "6px 4px 4px" }}>
+            {mobileNavItems.map(item => {
+              const active = item.kind === "section" && section === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    if (item.kind === "storefront") nav("storefront");
+                    else if (item.kind === "logout") handleLogout();
+                    else { setSection(item.id); setSelectedTire(null); }
+                  }}
+                  title={item.label}
+                  style={{
+                    flex: "0 0 auto",
+                    minWidth: 52,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 2,
+                    background: active ? "#1E3A5F" : "transparent",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    color: active ? "#fff" : "rgba(255,255,255,0.75)",
+                  }}
+                >
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>{item.icon}</span>
+                  <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.2 }}>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </nav>
       )}
     </div>
@@ -1305,7 +1350,21 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
           Loading inventory…
         </div>
       )}
-      {!inventoryLoading && (
+      {!inventoryLoading && (isMobile ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>
+          {filtered.map(t => (
+            <div key={t.id} style={{ ...S.card, padding: "16px 18px" }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.gray900 }}>{t.brand} {t.model}</div>
+              {t.featured && <span style={{ fontSize: 11, background: "#FEF9C3", color: "#854D0E", padding: "2px 8px", borderRadius: 4, marginTop: 6, display: "inline-block" }}>Featured</span>}
+              <div style={{ fontSize: 14, color: COLORS.gray500, marginTop: 6 }}>{t.size}</div>
+              <div style={{ marginTop: 8 }}><span style={S.badge(t.condition)}>{t.condition}</span></div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.gray900, marginTop: 10 }}>${t.price}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: t.qty === 0 ? COLORS.red : t.qty <= 2 ? COLORS.orange : COLORS.gray700, marginTop: 4 }}>Qty: {t.qty}</div>
+              <button type="button" onClick={() => setSelectedTire(t)} style={{ ...S.btn("primary", "sm"), width: "100%", justifyContent: "center", marginTop: 14 }}>Edit</button>
+            </div>
+          ))}
+        </div>
+      ) : (
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{["Tire","Size","Cond.","Type","Qty","Price/Tire","Set Price","Status",""].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
         <tbody>{filtered.map(t => <tr key={t.id} style={{ cursor: "pointer" }}>
@@ -1320,7 +1379,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
           <td style={S.td}><button onClick={() => setSelectedTire(t)} style={{ ...S.btn("ghost", "sm") }}>Edit</button></td>
         </tr>)}</tbody>
       </table>
-      )}
+      ))}
     </div>
   </div>;
 }
@@ -1475,6 +1534,7 @@ function AppointmentsPage({ shopId, showToast }) {
 }
 
 function CustomersPage({ shopId, showToast }) {
+  const isMobile = useWindowWidth() < 768;
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customers, setCustomers] = useState([]);
 
@@ -1506,7 +1566,19 @@ function CustomersPage({ shopId, showToast }) {
         Loading customers…
       </div>
     )}
-    {!customersLoading && (
+    {!customersLoading && (isMobile ? (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {customers.map(c => (
+          <div key={c.id} style={{ ...S.card, padding: "16px 18px" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.gray900 }}>{c.name}</div>
+            <div style={{ fontSize: 14, color: COLORS.gray600, marginTop: 6 }}>{c.phone}</div>
+            <div style={{ fontSize: 14, color: COLORS.gray600, marginTop: 4 }}>{c.email}</div>
+            <div style={{ fontSize: 14, color: COLORS.gray700, marginTop: 6 }}>{c.vehicle}</div>
+            <div style={{ fontSize: 13, color: COLORS.gray400, marginTop: 8 }}>Last order: {c.lastOrderDate}</div>
+          </div>
+        ))}
+      </div>
+    ) : (
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{["Name","Phone","Email","Vehicle","Last order"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
@@ -1519,7 +1591,7 @@ function CustomersPage({ shopId, showToast }) {
         </tr>)}</tbody>
       </table>
     </div>
-    )}
+    ))}
   </div>;
 }
 
@@ -1579,21 +1651,34 @@ function ShopSettings({ showToast }) {
   </div>;
 }
 
-function ShopBilling() {
+function ShopBilling({ plan, status }) {
+  const planDef = LOCAL_PLANS.find(p => p.name === plan) ?? LOCAL_PLANS.find(p => p.name === "Growth Partner");
+  const planStatus = status || "Active";
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Billing</h2>
-    <div style={{ ...S.card, maxWidth: 480, marginBottom: 20 }}>
+    <div style={{ ...S.card, maxWidth: 520, marginBottom: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.gray400 }}>CURRENT PLAN</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.blue }}>Growth Partner</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.gray700 }}>$249/month</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.blue }}>{planDef.name}</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.gray700 }}>${planDef.price}/month</div>
         </div>
-        <span style={S.badge("Active")}>Active</span>
+        <span style={S.badge(planStatus)}>{planStatus}</span>
       </div>
       <div style={{ borderTop: "1px solid #E2E8F0", marginTop: 16, paddingTop: 16, fontSize: 14, color: COLORS.gray500 }}>
         Next billing date: <strong>June 1, 2026</strong><br />Member since: November 2025
       </div>
+    </div>
+    <div style={{ ...S.card, maxWidth: 520 }}>
+      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12, color: COLORS.gray900 }}>Plan features</div>
+      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+        {planDef.features.map(f => (
+          <li key={f} style={{ display: "flex", gap: 8, fontSize: 14, color: COLORS.gray700, marginBottom: 10, lineHeight: 1.5 }}>
+            <span style={{ color: COLORS.green, flexShrink: 0 }}>✓</span>
+            <span>{f}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   </div>;
 }
