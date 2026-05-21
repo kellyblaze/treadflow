@@ -371,6 +371,7 @@ function LandingPage({ nav }) {
         <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>© 2026 TreadFlow · Invite-Only Platform</div>
         <div style={{ display: "flex", gap: 20 }}>
           {["Privacy","Terms","Contact"].map(l => <span key={l} style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, cursor: "pointer" }}>{l}</span>)}
+          <span onClick={() => nav("login")} style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, cursor: "pointer" }}>Login</span>
         </div>
       </div>
     </div>
