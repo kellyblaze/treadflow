@@ -1256,13 +1256,11 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const [editPrice, setEditPrice] = useState("");
   const [editSetPrice, setEditSetPrice] = useState("");
   const [editQty, setEditQty] = useState("");
-
   const recognitionRef = useRef(null);
   const listeningRef = useRef(false);
   const silenceTimerRef = useRef(null);
   const transcriptRef = useRef("");
   const skipProcessOnEndRef = useRef(false);
-  const [isListening, setIsListening] = useState(false);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {
