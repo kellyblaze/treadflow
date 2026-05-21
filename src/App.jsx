@@ -2264,7 +2264,6 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      {navBar}
       {page === "home" && <LandingPage nav={nav} />}
       {page === "login" && <LoginPage nav={nav} />}
       {page === "signup" && <SignUpPage nav={nav} />}
