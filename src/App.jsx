@@ -236,6 +236,20 @@ const S = {
   td: { padding: "11px 14px", fontSize: 13, color: COLORS.gray800, borderBottom: "1px solid #F1F5F9" },
 };
 
+function useWindowWidth() {
+  const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1024));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
+function gridCols(desktop, isMobile) {
+  return isMobile ? "1fr" : desktop;
+}
+
 // ── Components ────────────────────────────────────────────────────────────
 function NavLink({ label, active, onClick }) {
   return <button onClick={onClick} style={{ background: "none", border: "none", cursor: "pointer", padding: "8px 14px", borderRadius: 8, fontSize: 14, fontWeight: active ? 600 : 400, color: active ? COLORS.blue : COLORS.gray600, background: active ? "#EFF6FF" : "transparent" }}>{label}</button>;
@@ -261,6 +275,8 @@ function MetricCard({ label, value, sub, color }) {
 
 // ── 1. PUBLIC LANDING PAGE ────────────────────────────────────────────────
 function LandingPage({ nav }) {
+  const width = useWindowWidth();
+  const isMobile = width < 768;
   const features = [
     { icon: "🛞", title: "Online Tire Storefront", desc: "Your own branded tire shop website with searchable inventory, live pricing, and tire detail pages." },
     { icon: "📦", title: "Inventory Management", desc: "Track new and used tires by size, brand, condition, tread depth, and quantity in real time." },
@@ -286,24 +302,26 @@ function LandingPage({ nav }) {
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", background: "#fff" }}>
       {/* Nav */}
-      <div style={{ background: COLORS.navy, padding: "0 40px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, position: "sticky", top: 0, zIndex: 100 }}>
+      <div style={{ background: COLORS.navy, padding: isMobile ? "0 16px" : "0 40px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, position: "sticky", top: 0, zIndex: 100, gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 32, height: 32, background: COLORS.orange, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#fff", fontSize: 16 }}>T</div>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 18 }}>TreadFlow</span>
         </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {["Features","Pricing","Market Availability","FAQ"].map(l => <button key={l} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", fontSize: 14, padding: "8px 12px", cursor: "pointer" }}>{l}</button>)}
-        </div>
-        <button onClick={() => nav("invite")} style={{ ...S.btn("orange"), fontWeight: 700 }}>Request Invite →</button>
+        {!isMobile && (
+          <div style={{ display: "flex", gap: 4 }}>
+            {["Features","Pricing","Market Availability","FAQ"].map(l => <button key={l} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", fontSize: 14, padding: "8px 12px", cursor: "pointer" }}>{l}</button>)}
+          </div>
+        )}
+        <button onClick={() => nav("invite")} style={{ ...S.btn("orange"), fontWeight: 700, ...(isMobile ? { width: "100%", maxWidth: 160, justifyContent: "center" } : {}) }}>Request Invite →</button>
       </div>
       {/* Hero */}
-      <div style={{ background: `linear-gradient(135deg, ${COLORS.navy} 0%, #0F2040 60%, #1a1a2e 100%)`, padding: "100px 40px 120px", textAlign: "center" }}>
+      <div style={{ background: `linear-gradient(135deg, ${COLORS.navy} 0%, #0F2040 60%, #1a1a2e 100%)`, padding: isMobile ? "60px 20px 80px" : "100px 40px 120px", textAlign: "center" }}>
         <div style={{ display: "inline-block", background: "rgba(249,115,22,0.15)", border: "1px solid rgba(249,115,22,0.4)", borderRadius: 99, padding: "5px 16px", fontSize: 13, color: COLORS.orange, fontWeight: 600, marginBottom: 20 }}>✦ Invite-Only Access · Limited Shops Per Market</div>
-        <h1 style={{ fontSize: 52, fontWeight: 800, color: "#fff", margin: "0 auto 20px", lineHeight: 1.15, maxWidth: 800 }}>The Invite-Only Online Storefront Platform for Tire Shops</h1>
-        <p style={{ fontSize: 20, color: "rgba(255,255,255,0.65)", maxWidth: 640, margin: "0 auto 40px", lineHeight: 1.6 }}>TreadFlow helps selected tire shops launch searchable online tire inventory, accept customer orders, and modernize their sales process before competitors catch up.</p>
-        <div style={{ display: "flex", gap: 14, justifyContent: "center" }}>
-          <button onClick={() => nav("invite")} style={{ ...S.btn("orange", "lg"), fontWeight: 700 }}>Request an Invite →</button>
-          <button onClick={() => nav("market")} style={{ ...S.btn("ghost", "lg") }}>Check Market Availability</button>
+        <h1 style={{ fontSize: isMobile ? 32 : 52, fontWeight: 800, color: "#fff", margin: "0 auto 20px", lineHeight: 1.15, maxWidth: 800 }}>The Invite-Only Online Storefront Platform for Tire Shops</h1>
+        <p style={{ fontSize: isMobile ? 16 : 20, color: "rgba(255,255,255,0.65)", maxWidth: 640, margin: "0 auto 40px", lineHeight: 1.6 }}>TreadFlow helps selected tire shops launch searchable online tire inventory, accept customer orders, and modernize their sales process before competitors catch up.</p>
+        <div style={{ display: "flex", gap: 14, justifyContent: "center", flexDirection: isMobile ? "column" : "row", alignItems: "stretch", maxWidth: isMobile ? 360 : undefined, margin: "0 auto" }}>
+          <button onClick={() => nav("invite")} style={{ ...S.btn("orange", "lg"), fontWeight: 700, ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>Request an Invite →</button>
+          <button onClick={() => nav("market")} style={{ ...S.btn("ghost", "lg"), ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>Check Market Availability</button>
         </div>
         <div style={{ display: "flex", gap: 32, justifyContent: "center", marginTop: 60, color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
           {["Invite-only access","Limited shops per market","Setup in under 10 days","Cancel anytime"].map(t => <span key={t}>✓ {t}</span>)}
@@ -316,7 +334,7 @@ function LandingPage({ nav }) {
           <h2 style={{ fontSize: 36, fontWeight: 800, color: COLORS.gray900, margin: "0 auto 14px" }}>Everything your shop needs online</h2>
           <p style={{ color: COLORS.gray500, fontSize: 16, maxWidth: 540, margin: "0 auto" }}>From searchable inventory to online reservations and appointment booking — all in one platform built for serious tire shops.</p>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20, maxWidth: 1100, margin: "0 auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(auto-fit, minmax(240px, 1fr))", isMobile), gap: 20, maxWidth: 1100, margin: "0 auto" }}>
           {features.map(f => <div key={f.title} style={{ ...S.card, background: "#fff" }}>
             <div style={{ fontSize: 28, marginBottom: 12 }}>{f.icon}</div>
             <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.gray900, marginBottom: 6 }}>{f.title}</div>
@@ -380,6 +398,8 @@ function LandingPage({ nav }) {
 
 // ── 2. REQUEST INVITE ────────────────────────────────────────────────────
 function InvitePage({ nav }) {
+  const width = useWindowWidth();
+  const isMobile = width < 768;
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ shopName: "", ownerName: "", phone: "", email: "", address: "", city: "", state: "", locations: "1", website: "", tireType: "Both", inventory: "", currentMethod: "Spreadsheets", online: "No", installation: "Yes", features: [], notes: "" });
   const features = ["Online tire storefront","Inventory management","Online ordering","Appointment booking","Payments/deposits","AI chatbot","SEO/local marketing"];
@@ -407,8 +427,8 @@ function InvitePage({ nav }) {
           <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 15 }}>Tell us about your shop. We review every application personally.</p>
         </div>
         <div style={{ background: "#fff", borderRadius: 16, padding: "36px 36px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            {[["shopName","Shop Name"],["ownerName","Owner Name"],["phone","Phone Number"],["email","Email Address"],["address","Shop Address"],["city","City"],["state","State"],["website","Current Website URL"]].map(([k, l]) => <div key={k} style={k === "address" || k === "website" ? { gridColumn: "1/-1" } : {}}>
+          <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16 }}>
+            {[["shopName","Shop Name"],["ownerName","Owner Name"],["phone","Phone Number"],["email","Email Address"],["address","Shop Address"],["city","City"],["state","State"],["website","Current Website URL"]].map(([k, l]) => <div key={k} style={!isMobile && (k === "address" || k === "website") ? { gridColumn: "1/-1" } : {}}>
               <label style={S.label}>{l}</label>
               <input style={S.input} value={form[k]} onChange={e => set(k, e.target.value)} />
             </div>)}
@@ -565,6 +585,7 @@ function SuperAdmin({ nav }) {
 }
 
 function AdminOverview({ shops, apps, setSection }) {
+  const isMobile = useWindowWidth() < 768;
   const metrics = [
     { label: "Total Shops", value: shops.length, color: COLORS.blue },
     { label: "Active Shops", value: shops.filter(s => s.status === "Active").length, color: COLORS.green },
@@ -577,10 +598,10 @@ function AdminOverview({ shops, apps, setSection }) {
   ];
   return <div>
     <div style={{ marginBottom: 24 }}><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Platform Overview</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>Real-time snapshot of TreadFlow</p></div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 14, marginBottom: 28 }}>
       {metrics.map(m => <MetricCard key={m.label} {...m} />)}
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Recent Applications</div>
         {mockApplications.slice(0, 4).map(a => <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
@@ -626,15 +647,16 @@ function ApplicationsList({ apps, allApps, filter, setFilter, onSelect }) {
 }
 
 function ApplicationDetail({ app, onBack, onAction }) {
+  const isMobile = useWindowWidth() < 768;
   const [note, setNote] = useState("");
   const [plan, setPlan] = useState(app.plan || "Early Partner");
   return <div>
     <button onClick={onBack} style={{ background: "none", border: "none", color: COLORS.blue, cursor: "pointer", fontSize: 14, marginBottom: 20 }}>← Back to Applications</button>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 340px", isMobile), gap: 20 }}>
       <div style={S.card}>
         <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{app.shop}</div>
         <div style={{ color: COLORS.gray500, fontSize: 14, marginBottom: 20 }}>Application submitted {app.date}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16 }}>
           {[["Owner", app.owner],["Email", app.email],["Phone", app.phone],["Location", `${app.city}, ${app.state}`],["Tire Types", app.tires],["Inventory Size", app.inventory],["Market", app.market],["Current Status", <span style={S.badge(app.status)}>{app.status}</span>]].map(([k, v]) => <div key={k}>
             <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray400, marginBottom: 2 }}>{k}</div>
             <div style={{ fontSize: 14, color: COLORS.gray800 }}>{v}</div>
@@ -723,6 +745,7 @@ function MarketsPage({ showToast }) {
 }
 
 function StorefrontStudio({ shop, shops, onShopChange, showToast }) {
+  const isMobile = useWindowWidth() < 768;
   const [primary, setPrimary] = useState("#1E6FD9");
   const [secondary, setSecondary] = useState("#F97316");
   const [hero, setHero] = useState(storefront.hero);
@@ -749,7 +772,7 @@ function StorefrontStudio({ shop, shops, onShopChange, showToast }) {
         <button onClick={() => showToast("Changes published live!")} style={S.btn("primary")}>Publish Live →</button>
       </div>
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("320px 1fr", isMobile), gap: 20 }}>
       {/* Controls */}
       <div style={S.card}>
         <div style={{ display: "flex", gap: 6, marginBottom: 18, borderBottom: "1px solid #E2E8F0", paddingBottom: 14 }}>
@@ -835,7 +858,7 @@ function StorefrontStudio({ shop, shops, onShopChange, showToast }) {
             </div>}
             {vis["Featured Tires"] && <div style={{ padding: "12px 14px" }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.gray700, marginBottom: 8 }}>Featured Tires</div>
-              <div style={{ display: "grid", gridTemplateColumns: preview === "mobile" ? "1fr" : "1fr 1fr", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile || preview === "mobile" ? "1fr" : "1fr 1fr", gap: 8 }}>
                 {mockTires.slice(0,2).map(t => <div key={t.id} style={{ border: "1px solid #E2E8F0", borderRadius: 8, padding: "10px 12px" }}>
                   <div style={{ background: "#F1F5F9", borderRadius: 6, height: 60, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, marginBottom: 6 }}>🛞</div>
                   <div style={{ fontSize: 12, fontWeight: 700 }}>{t.brand} {t.model}</div>
@@ -863,9 +886,10 @@ function StorefrontStudio({ shop, shops, onShopChange, showToast }) {
 }
 
 function PlansPage() {
+  const isMobile = useWindowWidth() < 768;
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Plans & Billing</h2>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile), gap: 16 }}>
       {[{name:"Early Partner",price:149,shops:1},{name:"Growth Partner",price:249,shops:1},{name:"Market Leader",price:399,shops:3}].map(p => <div key={p.name} style={S.card}>
         <div style={{ fontWeight: 700, fontSize: 16 }}>{p.name}</div>
         <div style={{ fontSize: 28, fontWeight: 800, color: COLORS.blue, margin: "8px 0" }}>${p.price}<span style={{ fontSize: 14, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
@@ -915,9 +939,10 @@ function AdminOrders() {
 }
 
 function AdminSettings() {
+  const isMobile = useWindowWidth() < 768;
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Platform Settings</h2>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
       {[["Platform Name","TreadFlow"],["Support Email","support@treadflow.io"],["Default Invite Expiry","14 days"],["Max Shops Per Market","3"]].map(([l, v]) => <div key={l} style={S.card}>
         <label style={S.label}>{l}</label>
         <input style={S.input} defaultValue={v} />
@@ -935,6 +960,8 @@ function AdminSettings() {
 
 // ── 5. SHOP DASHBOARD ─────────────────────────────────────────────────────
 function ShopDashboard({ nav }) {
+  const width = useWindowWidth();
+  const isMobile = width < 768;
   const [section, setSection] = useState("overview");
   const [tires, setTires] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -1016,8 +1043,9 @@ function ShopDashboard({ nav }) {
   }
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif", background: COLORS.gray50, position: "relative" }}>
-      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, background: COLORS.gray900, color: "#fff", padding: "12px 20px", borderRadius: 10, fontSize: 14, zIndex: 999 }}>{toast}</div>}
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: "100vh", height: isMobile ? "auto" : "100vh", fontFamily: "system-ui, sans-serif", background: COLORS.gray50, position: "relative" }}>
+      {toast && <div style={{ position: "fixed", bottom: isMobile ? 88 : 24, right: 24, background: COLORS.gray900, color: "#fff", padding: "12px 20px", borderRadius: 10, fontSize: 14, zIndex: 999 }}>{toast}</div>}
+      {!isMobile && (
       <div style={{ width: 220, background: "#0A1628", padding: "20px 12px", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 8px 24px" }}>
           <div style={{ width: 30, height: 30, background: COLORS.blue, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#fff", fontSize: 14 }}>{shopInitial}</div>
@@ -1033,7 +1061,8 @@ function ShopDashboard({ nav }) {
           <button onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.4)", border: "none", width: "100%" }}>← Back to Home</button>
         </div>
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
+      )}
+      <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "16px 16px 88px" : 28 }}>
         {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={shopRecord.name} shopLocation={shopLocationLine} />}
         {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
         {section === "orders" && <OrdersPage shopId={shopId} shopName={shopRecord.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
@@ -1043,11 +1072,27 @@ function ShopDashboard({ nav }) {
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "billing" && <ShopBilling />}
       </div>
+      {isMobile && (
+        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#0A1628", borderTop: "1px solid rgba(255,255,255,0.1)", display: "flex", justifyContent: "space-around", alignItems: "center", padding: "8px 4px max(8px, env(safe-area-inset-bottom))", zIndex: 100 }}>
+          {sidebar.map(([id, icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => { setSection(id); setSelectedTire(null); }}
+              title={id}
+              style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: section === id ? "#1E3A5F" : "transparent", border: "none", borderRadius: 10, padding: "10px 4px", cursor: "pointer", fontSize: 22 }}
+            >
+              {icon}
+            </button>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }
 
 function ShopOverview({ tires, orders, shopName, shopLocation }) {
+  const isMobile = useWindowWidth() < 768;
   const pending = orders.filter(o => o.status === "Pending" || o.status === "pending").length;
   const confirmed = orders.filter(o => o.status === "Confirmed").length;
   const completed = orders.filter(o => o.status === "Completed").length;
@@ -1059,13 +1104,13 @@ function ShopOverview({ tires, orders, shopName, shopLocation }) {
       <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Dashboard</h2>
       <p style={{ color: COLORS.gray500, marginTop: 4 }}>{sub}</p>
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 14, marginBottom: 24 }}>
       <MetricCard label="Total Tires" value={tires.reduce((a, t) => a + t.qty, 0)} />
       <MetricCard label="Low Stock" value={lowStock} color={lowStock > 0 ? COLORS.red : COLORS.green} />
       <MetricCard label="Pending Orders" value={pending} color={pending > 0 ? COLORS.orange : COLORS.gray700} />
       <MetricCard label="Est. Revenue (Month)" value={`$${revenue.toFixed(0)}`} color={COLORS.green} />
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 14 }}>Recent Orders</div>
         {orders.slice(0, 4).map(o => <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
@@ -1085,6 +1130,7 @@ function ShopOverview({ tires, orders, shopName, shopLocation }) {
 }
 
 function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSelectedTire }) {
+  const isMobile = useWindowWidth() < 768;
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filterCondition, setFilterCondition] = useState("All");
@@ -1187,12 +1233,12 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
 
   if (selectedTire) return <div>
     <button onClick={() => setSelectedTire(null)} style={{ background: "none", border: "none", color: COLORS.blue, cursor: "pointer", fontSize: 14, marginBottom: 20 }}>← Back to Inventory</button>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 320px", isMobile), gap: 20 }}>
       <div style={S.card}>
         <div style={{ background: COLORS.gray100, borderRadius: 10, height: 200, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 60, marginBottom: 20 }}>🛞</div>
         <div style={{ fontWeight: 800, fontSize: 22 }}>{selectedTire.brand} {selectedTire.model}</div>
         <div style={{ color: COLORS.gray500, marginBottom: 16 }}>{selectedTire.size} · {selectedTire.type}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr 1fr", isMobile), gap: 12 }}>
           {[["Condition",selectedTire.condition],["Quantity",selectedTire.qty],["Tread Depth",selectedTire.tread||"N/A"],["DOT Date",selectedTire.dot||"—"],["Load Index",selectedTire.load],["Speed Rating",selectedTire.speed],["Install Fee","$"+selectedTire.installFee],["Disposal Fee","$"+selectedTire.disposalFee],["Status",selectedTire.status]].map(([k,v]) => <div key={k} style={{ background: COLORS.gray50, borderRadius: 8, padding: "10px 12px" }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.gray400, marginBottom: 2 }}>{k}</div>
             <div style={{ fontSize: 15, fontWeight: 700 }}>{v}</div>
@@ -1239,7 +1285,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     </div>
     {showAdd && <div style={{ ...S.card, marginBottom: 20, background: "#F0F7FF", border: "1px solid #93C5FD" }}>
       <div style={{ fontWeight: 700, marginBottom: 14 }}>Add New Tire</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 12 }}>
         {[["brand","Brand"],["model","Model"],["size","Size (e.g. 225/55R17)"],["price","Price"]].map(([k,l]) => <div key={k}>
           <label style={S.label}>{l}</label>
           <input style={S.input} value={newTire[k]} onChange={e => setNewTire(t => ({...t, [k]: e.target.value}))} />
@@ -1280,6 +1326,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
 }
 
 function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast }) {
+  const isMobile = useWindowWidth() < 768;
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
   const filtered = filter === "All" ? orders : orders.filter(o => o.status.toLowerCase() === filter.toLowerCase());
@@ -1339,7 +1386,7 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
     )}
     {!ordersLoading && (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {filtered.map(o => <div key={o.id} style={{ ...S.card, display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 16, alignItems: "center" }}>
+      {filtered.map(o => <div key={o.id} style={{ ...S.card, display: "grid", gridTemplateColumns: gridCols("1fr 1fr 1fr auto", isMobile), gap: 16, alignItems: isMobile ? "stretch" : "center" }}>
         <div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
             <span style={{ fontWeight: 700, color: COLORS.blue }}>{o.orderLabel || o.id}</span>
@@ -1507,9 +1554,10 @@ function StaffPage({ showToast }) {
 }
 
 function ShopSettings({ showToast }) {
+  const isMobile = useWindowWidth() < 768;
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Shop Settings</h2>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Business Info</div>
         {[["Shop Name","Greenville Tire Pros"],["Phone","(864) 555-0142"],["Email","info@greenvilletire.com"],["Address","1420 Wade Hampton Blvd, Greenville, SC"]].map(([l, v]) => <div key={l} style={{ marginBottom: 12 }}><label style={S.label}>{l}</label><input style={S.input} defaultValue={v} /></div>)}
@@ -1617,6 +1665,8 @@ async function storefrontSubmitReservation(shopId, {
 
 // ── 6. PUBLIC STOREFRONT ──────────────────────────────────────────────────
 function Storefront({ nav }) {
+  const width = useWindowWidth();
+  const isMobile = width < 768;
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
   const [publicShopInfo, setPublicShopInfo] = useState({ name: storefront.name, email: "" });
 
@@ -1709,7 +1759,7 @@ function Storefront({ nav }) {
           </div>
         </div>
         <div style={S.card}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 14 }}>
             <div>
               <label style={S.label}>Full Name</label>
               <input style={S.input} value={resName} onChange={e => setResName(e.target.value)} autoComplete="name" />
@@ -1834,7 +1884,7 @@ function Storefront({ nav }) {
         </div>
         <a href="tel:8645550142" style={{ color: "#fff", fontSize: 14, textDecoration: "none" }}>📞 (864) 555-0142</a>
       </div>
-      <div style={{ maxWidth: 900, margin: "32px auto", padding: "0 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
+      <div style={{ maxWidth: 900, margin: "32px auto", padding: "0 20px", display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 32 }}>
         <div>
           <div style={{ background: COLORS.gray100, borderRadius: 16, height: 300, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 80, marginBottom: 16 }}>🛞</div>
         </div>
@@ -1844,7 +1894,7 @@ function Storefront({ nav }) {
           <div style={{ fontSize: 18, color: COLORS.gray500, marginBottom: 20 }}>{selectedTire.size}</div>
           <div style={{ fontSize: 36, fontWeight: 800, color: COLORS.blue }}>${selectedTire.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/tire</span></div>
           {selectedTire.setPrice && <div style={{ fontSize: 18, color: COLORS.green, fontWeight: 700 }}>Set of 4: ${selectedTire.setPrice}</div>}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, margin: "20px 0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 10, margin: "20px 0" }}>
             {[["In Stock", selectedTire.qty + " available"], selectedTire.tread ? ["Tread Depth", selectedTire.tread] : ["DOT Date", selectedTire.dot], ["Load Index", selectedTire.load], ["Speed Rating", selectedTire.speed], ["Type", selectedTire.type], ["Install Fee", "$" + selectedTire.installFee]].map(([k, v]) => <div key={k} style={{ background: COLORS.gray50, borderRadius: 8, padding: "8px 12px" }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.gray400 }}>{k}</div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>{v}</div>
@@ -1852,7 +1902,7 @@ function Storefront({ nav }) {
           </div>
           <p style={{ fontSize: 14, color: COLORS.gray600, lineHeight: 1.7, marginBottom: 20 }}>{selectedTire.desc}</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <button onClick={() => { setOrderTire(selectedTire); setShowOrder(true); }} style={{ ...S.btn("orange", "lg"), justifyContent: "center", fontWeight: 700 }}>Reserve Now →</button>
+            <button onClick={() => { setOrderTire(selectedTire); setShowOrder(true); }} style={{ ...S.btn("orange", "lg"), justifyContent: "center", fontWeight: 700, ...(isMobile ? { width: "100%" } : {}) }}>Reserve Now →</button>
             <button style={{ ...S.btn("primary", "lg"), justifyContent: "center" }}>📅 Book Installation</button>
             <a href="tel:8645550142" style={{ ...S.btn("secondary", "lg"), justifyContent: "center", textDecoration: "none" }}>📞 Call Shop</a>
           </div>
@@ -1870,7 +1920,7 @@ function Storefront({ nav }) {
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 17 }}>{storefront.name}</span>
         </div>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          {["Inventory","Services","About","Contact"].map(l => <span key={l} style={{ color: "rgba(255,255,255,0.8)", fontSize: 14, cursor: "pointer" }}>{l}</span>)}
+          {!isMobile && ["Inventory","Services","About","Contact"].map(l => <span key={l} style={{ color: "rgba(255,255,255,0.8)", fontSize: 14, cursor: "pointer" }}>{l}</span>)}
           <a href="tel:8645550142" style={{ ...S.btn("orange", "sm"), textDecoration: "none", fontWeight: 700 }}>📞 Call Now</a>
         </div>
       </div>
@@ -1882,9 +1932,9 @@ function Storefront({ nav }) {
       <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center" }}>
         <h1 style={{ fontSize: 44, fontWeight: 800, color: "#fff", margin: "0 auto 16px", maxWidth: 700, lineHeight: 1.2 }}>{storefront.hero}</h1>
         <p style={{ fontSize: 18, color: "rgba(255,255,255,0.65)", maxWidth: 540, margin: "0 auto 32px", lineHeight: 1.6 }}>{storefront.heroSub}</p>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", maxWidth: 520, margin: "0 auto", background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: 12 }}>
-          <input style={{ ...S.input, flex: 1, background: "#fff" }} placeholder="Search by size, brand, or model (e.g. 225/55R17)..." value={search} onChange={e => setSearch(e.target.value)} />
-          <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap" }}>Search Tires</button>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", maxWidth: 520, margin: "0 auto", background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, flexDirection: isMobile ? "column" : "row", width: isMobile ? "100%" : undefined, boxSizing: "border-box" }}>
+          <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: "#fff", boxSizing: "border-box" }} placeholder="Search by size, brand, or model (e.g. 225/55R17)..." value={search} onChange={e => setSearch(e.target.value)} />
+          <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap", ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>Search Tires</button>
         </div>
         <div style={{ display: "flex", gap: 20, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
           {[["📍","1420 Wade Hampton Blvd, Greenville SC"],["🕐","Mon–Fri 8am–6pm · Sat 8am–4pm"],["⭐","4.9/5 — 127 reviews"]].map(([icon, text]) => <span key={text} style={{ color: "rgba(255,255,255,0.6)", fontSize: 14 }}>{icon} {text}</span>)}
@@ -1898,7 +1948,7 @@ function Storefront({ nav }) {
             {["All","New","Used"].map(c => <button key={c} onClick={() => setCondFilter(c)} style={{ padding: "6px 16px", borderRadius: 8, fontSize: 14, cursor: "pointer", border: `1px solid ${condFilter === c ? storefront.primaryColor : COLORS.gray300}`, background: condFilter === c ? storefront.primaryColor : "#fff", color: condFilter === c ? "#fff" : COLORS.gray600 }}>{c}</button>)}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(auto-fill, minmax(260px, 1fr))", isMobile), gap: 20 }}>
           {filtered.map(t => <div key={t.id} style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden", cursor: "pointer" }} onClick={() => setSelectedTire(t)}>
             <div style={{ background: COLORS.gray100, height: 160, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, position: "relative" }}>
               🛞
@@ -1924,7 +1974,7 @@ function Storefront({ nav }) {
       {/* Services */}
       <div style={{ padding: "60px 40px", background: "#fff" }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Our Services</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, maxWidth: 900, margin: "0 auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(auto-fit, minmax(180px, 1fr))", isMobile), gap: 16, maxWidth: 900, margin: "0 auto" }}>
           {[["🔧","Tire Installation","$25–$35/tire"],["⚖️","Wheel Balancing","$12/wheel"],["🔄","Tire Rotation","$19.99"],["🩹","Flat Repair","$19.99"],["🔩","TPMS Service","$15/sensor"],["🚗","Used Tire Mounting","$15/tire"]].map(([i,s,p]) => <div key={s} style={{ background: COLORS.gray50, borderRadius: 12, padding: "20px 18px", textAlign: "center" }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>{i}</div>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{s}</div>
@@ -1935,7 +1985,7 @@ function Storefront({ nav }) {
       {/* Reviews */}
       <div style={{ padding: "60px 40px", background: COLORS.gray50 }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Customer Reviews</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, maxWidth: 900, margin: "0 auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile), gap: 20, maxWidth: 900, margin: "0 auto" }}>
           {[["Terrence H.","⭐⭐⭐⭐⭐","Great prices on used tires. In and out in 45 minutes. Will definitely be back!"],["Angela P.","⭐⭐⭐⭐⭐","Reserved online and they had my tires ready when I arrived. Super easy process."],["Devon C.","⭐⭐⭐⭐⭐","Best used tire shop in Greenville. Honest people and fair pricing."]].map(([n, r, t]) => <div key={n} style={{ ...S.card }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{n}</div>
             <div style={{ marginBottom: 8 }}>{r}</div>
