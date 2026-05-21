@@ -199,11 +199,37 @@ const mockMarkets = [
   { id: 5, city: "Raleigh", state: "NC", name: "Triangle Area", max: 4, active: 1, status: "Open" },
 ];
 
-const LOCAL_PLANS = [
-  { name: "Early Partner", price: 149, highlight: false, paymentLink: "https://buy.stripe.com/7sY8wJ3IDbYS75H5Je4Rq00", features: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"] },
-  { name: "Growth Partner", price: 249, highlight: true, paymentLink: "https://buy.stripe.com/00w4gt2Ezgf83Tvb3y4Rq01", features: ["Everything in Early Partner", "Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"] },
-  { name: "Market Leader", price: 399, highlight: false, paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02", features: ["Everything in Growth", "AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"] },
+const PLAN_TIER_DEFS = [
+  {
+    name: "Early Partner",
+    price: 149,
+    highlight: false,
+    paymentLink: "https://buy.stripe.com/7sY8wJ3IDbYS75H5Je4Rq00",
+    tierFeatures: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"],
+  },
+  {
+    name: "Growth Partner",
+    price: 249,
+    highlight: true,
+    paymentLink: "https://buy.stripe.com/00w4gt2Ezgf83Tvb3y4Rq01",
+    tierFeatures: ["Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"],
+  },
+  {
+    name: "Market Leader",
+    price: 399,
+    highlight: false,
+    paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02",
+    tierFeatures: ["AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"],
+  },
 ];
+
+const LOCAL_PLANS = PLAN_TIER_DEFS.map((tier, index) => {
+  const { tierFeatures, ...plan } = tier;
+  return {
+    ...plan,
+    features: PLAN_TIER_DEFS.slice(0, index + 1).flatMap(t => t.tierFeatures),
+  };
+});
 
 const storefront = {
   logo: "G",
@@ -1676,11 +1702,14 @@ function ShopBilling({ plan, status }) {
       </div>
     </div>
     <div style={{ ...S.card, maxWidth: 520 }}>
-      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12, color: COLORS.gray900 }}>Plan features</div>
+      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6, color: COLORS.gray900 }}>Everything included in your plan</div>
+      <p style={{ fontSize: 14, color: COLORS.gray500, margin: "0 0 16px", lineHeight: 1.5 }}>
+        Your <strong>{planDef.name}</strong> subscription includes all {planDef.features.length} features below — including everything from lower tiers.
+      </p>
       <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
         {planDef.features.map(f => (
-          <li key={f} style={{ display: "flex", gap: 8, fontSize: 14, color: COLORS.gray700, marginBottom: 10, lineHeight: 1.5 }}>
-            <span style={{ color: COLORS.green, flexShrink: 0 }}>✓</span>
+          <li key={f} style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, color: COLORS.gray700, marginBottom: 10, lineHeight: 1.5 }}>
+            <span style={{ color: COLORS.green, flexShrink: 0, fontWeight: 700, fontSize: 15 }}>✓</span>
             <span>{f}</span>
           </li>
         ))}
