@@ -1021,11 +1021,16 @@ function ShopDashboard({ nav }) {
     nav("login");
   };
 
+  const sectionTabs = sidebar.map(([id, icon, label]) => ({ id, icon, label: label.split(" ")[0], kind: "section" }));
+  const settingsIdx = sectionTabs.findIndex(t => t.id === "settings");
   const mobileNavItems = [
-    ...sidebar.map(([id, icon, label]) => ({ id, icon, label: label.split(" ")[0], kind: "section" })),
+    ...sectionTabs.slice(0, settingsIdx + 1),
+    { id: "design", icon: "🎨", label: "Design", kind: "section" },
+    ...sectionTabs.slice(settingsIdx + 1),
     { id: "storefront", icon: "🌐", label: "Store", kind: "storefront" },
     { id: "logout", icon: "🚪", label: "Out", kind: "logout" },
   ];
+  const designShopRecord = shopRecord ? { id: shopRecord.id, name: shopRecord.name, city: shopRecord.city, state: shopRecord.state } : null;
 
   if (shopLoading) {
     return (
@@ -1091,6 +1096,7 @@ function ShopDashboard({ nav }) {
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
+        {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
         {section === "billing" && <ShopBilling plan={shopRecord.plan} status={shopRecord.status} />}
       </div>
       {isMobile && (
