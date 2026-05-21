@@ -941,6 +941,7 @@ function ShopDashboard({ nav }) {
   const [selectedTire, setSelectedTire] = useState(null);
   const [shopRecord, setShopRecord] = useState(null);
   const [shopLoading, setShopLoading] = useState(true);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2800); };
 
@@ -948,10 +949,16 @@ function ShopDashboard({ nav }) {
     let cancelled = false;
     (async () => {
       setShopLoading(true);
+      setIsSuperAdmin(false);
       const { data: { user }, error: userErr } = await supabase.auth.getUser();
       if (cancelled) return;
       if (userErr || !user?.email) {
         setShopRecord(null);
+        setShopLoading(false);
+        return;
+      }
+      if (user.email === "powerlinkmarketing@protonmail.com") {
+        setIsSuperAdmin(true);
         setShopLoading(false);
         return;
       }
@@ -986,6 +993,10 @@ function ShopDashboard({ nav }) {
         Loading shop…
       </div>
     );
+  }
+
+  if (isSuperAdmin) {
+    return <SuperAdmin nav={nav} />;
   }
 
   if (!shopRecord) {
