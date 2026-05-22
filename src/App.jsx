@@ -1049,9 +1049,10 @@ function ShopDashboard({ nav }) {
   const [section, setSection] = useState("overview");
   const [tires, setTires] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [shops, setShops] = useState([]);
+  const [activeShop, setActiveShop] = useState(null);
   const [toast, setToast] = useState(null);
   const [selectedTire, setSelectedTire] = useState(null);
-  const [shopRecord, setShopRecord] = useState(null);
   const [shopLoading, setShopLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
@@ -1065,7 +1066,8 @@ function ShopDashboard({ nav }) {
       const { data: { user }, error: userErr } = await supabase.auth.getUser();
       if (cancelled) return;
       if (userErr || !user?.email) {
-        setShopRecord(null);
+        setShops([]);
+        setActiveShop(null);
         setShopLoading(false);
         return;
       }
@@ -1078,22 +1080,30 @@ function ShopDashboard({ nav }) {
         .from("shops")
         .select("id, name, owner_name, email, city, state, status, plan, slug")
         .eq("email", user.email)
-        .maybeSingle();
+        .order("name", { ascending: true });
       if (cancelled) return;
       if (error) {
         console.warn("Shop lookup failed:", error);
-        setShopRecord(null);
+        setShops([]);
+        setActiveShop(null);
       } else {
-        setShopRecord(data);
+        const shopsData = data || [];
+        setShops(shopsData);
+        setActiveShop(prev => {
+          if (prev) {
+            return shopsData.find(s => s.id === prev.id) || shopsData[0] || null;
+          }
+          return shopsData[0] || null;
+        });
       }
       setShopLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const shopId = shopRecord?.id ?? null;
-  const shopInitial = ((shopRecord?.name || "?").trim().charAt(0) || "?").toUpperCase();
-  const shopLocationLine = shopRecord ? [shopRecord.city, shopRecord.state].filter(Boolean).join(", ") : "";
+  const shopId = activeShop?.id ?? null;
+  const shopInitial = ((activeShop?.name || "?").trim().charAt(0) || "?").toUpperCase();
+  const shopLocationLine = activeShop ? [activeShop.city, activeShop.state].filter(Boolean).join(", ") : "";
 
   const sidebar = [
     ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["analytics","📈","Analytics"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
@@ -1113,7 +1123,7 @@ function ShopDashboard({ nav }) {
     { id: "storefront", icon: "🌐", label: "Store", kind: "storefront" },
     { id: "logout", icon: "🚪", label: "Out", kind: "logout" },
   ];
-  const designShopRecord = shopRecord ? { id: shopRecord.id, name: shopRecord.name, city: shopRecord.city, state: shopRecord.state } : null;
+  const designShopRecord = activeShop ? { id: activeShop.id, name: activeShop.name, city: activeShop.city, state: activeShop.state } : null;
 
   if (shopLoading) {
     return (
@@ -1127,7 +1137,7 @@ function ShopDashboard({ nav }) {
     return <SuperAdmin nav={nav} />;
   }
 
-  if (!shopRecord) {
+  if (!activeShop) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: COLORS.gray50 }}>
         <div style={{ background: "#fff", borderRadius: 16, padding: "40px 48px", maxWidth: 440, textAlign: "center", border: `1px solid ${COLORS.gray200}` }}>
@@ -1150,10 +1160,18 @@ function ShopDashboard({ nav }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 8px 24px" }}>
           <div style={{ width: 30, height: 30, background: COLORS.blue, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#fff", fontSize: 14 }}>{shopInitial}</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, lineHeight: 1.25 }} title={shopRecord.name}>{shopRecord.name}</div>
+            <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, lineHeight: 1.25 }} title={activeShop?.name}>{activeShop?.name}</div>
             <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>Shop Dashboard</div>
           </div>
         </div>
+        {shops.length > 1 && (
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 8 }}>Switch shop</label>
+            <select value={activeShop?.id || ""} onChange={e => setActiveShop(shops.find(s => s.id === e.target.value) || activeShop)} style={{ width: "100%", appearance: "none", borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#fff", padding: "10px 12px", fontSize: 13 }}>
+              {shops.map(shop => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+            </select>
+          </div>
+        )}
         {sidebar.map(([id, icon, label]) => <SidebarLink key={id} icon={icon} label={label} active={section === id} onClick={() => { setSection(id); setSelectedTire(null); }} />)}
         <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
           <button onClick={() => nav("storefront")} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)", width: "100%" }}>View My Storefront</button>
@@ -1166,15 +1184,15 @@ function ShopDashboard({ nav }) {
         {isMobile && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${COLORS.gray200}` }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.25 }} title={shopRecord.name}>{shopRecord.name}</div>
+              <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.25 }} title={activeShop?.name}>{activeShop?.name}</div>
               <div style={{ fontSize: 12, color: COLORS.gray500 }}>Shop Dashboard</div>
             </div>
             <button type="button" onClick={handleLogout} style={{ ...S.btn("secondary", "sm"), flexShrink: 0 }}>Logout</button>
           </div>
         )}
-        {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={shopRecord.name} shopLocation={shopLocationLine} />}
+        {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={activeShop?.name} shopLocation={shopLocationLine} />}
         {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
-        {section === "orders" && <OrdersPage shopId={shopId} shopName={shopRecord.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
+        {section === "orders" && <OrdersPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
@@ -1182,7 +1200,7 @@ function ShopDashboard({ nav }) {
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
-        {section === "billing" && <ShopBilling shopId={shopId} plan={shopRecord.plan} status={shopRecord.status} />}
+        {section === "billing" && <ShopBilling shopId={shopId} plan={activeShop?.plan} status={activeShop?.status} />}
       </div>
       {isMobile && (
         <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#0A1628", borderTop: "1px solid rgba(255,255,255,0.1)", zIndex: 100, paddingBottom: "max(6px, env(safe-area-inset-bottom))" }}>
