@@ -1096,7 +1096,7 @@ function ShopDashboard({ nav }) {
   const shopLocationLine = shopRecord ? [shopRecord.city, shopRecord.state].filter(Boolean).join(", ") : "";
 
   const sidebar = [
-    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
+    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["analytics","📈","Analytics"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
   ];
 
   const handleLogout = async () => {
@@ -1178,6 +1178,7 @@ function ShopDashboard({ nav }) {
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
+        {section === "analytics" && <AnalyticsPage shopId={shopId} orders={orders} tires={tires} customers={customers} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
@@ -2336,6 +2337,121 @@ function PromotionsPage({ shopId, showToast }) {
             <div style={{ fontSize: 13, color: COLORS.gray500 }}>Expired {p.end_date}</div>
           </div>
         ))}
+      </div>
+    </div>
+  </div>;
+}
+
+function AnalyticsPage({ shopId, orders, tires, customers, showToast }) {
+  const isMobile = useWindowWidth() < 768;
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const lastMonthStart = new Date(currentYear, currentMonth - 1, 1);
+  const lastMonthEnd = new Date(currentYear, currentMonth, 0);
+  const currentMonthStart = new Date(currentYear, currentMonth, 1);
+
+  const thisMonthOrders = orders.filter(o => {
+    const d = new Date(o.created_at || o.date);
+    return d >= currentMonthStart && d < new Date(currentYear, currentMonth + 1, 1);
+  });
+  const lastMonthOrders = orders.filter(o => {
+    const d = new Date(o.created_at || o.date);
+    return d >= lastMonthStart && d <= lastMonthEnd;
+  });
+
+  const thisMonthRevenue = thisMonthOrders.filter(o => o.status && o.status.toLowerCase() !== "cancelled").reduce((sum, o) => sum + (o.total || 0), 0);
+  const lastMonthRevenue = lastMonthOrders.filter(o => o.status && o.status.toLowerCase() !== "cancelled").reduce((sum, o) => sum + (o.total || 0), 0);
+  const revenueChange = lastMonthRevenue > 0 ? (((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100).toFixed(1) : 0;
+
+  const orderCounts = {};
+  (orders || []).forEach(o => {
+    const status = o.status || "Pending";
+    orderCounts[status] = (orderCounts[status] || 0) + 1;
+  });
+
+  const topTires = {};
+  (orders || []).forEach(o => {
+    const tire = o.tire || "Unknown";
+    topTires[tire] = (topTires[tire] || 0) + (o.qty || 1);
+  });
+  const topTiresList = Object.entries(topTires).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const thisMonthCustomers = customers.filter(c => {
+    const d = new Date(c.created_at);
+    return d >= currentMonthStart && d < new Date(currentYear, currentMonth + 1, 1);
+  }).length;
+
+  const avgOrderValue = thisMonthOrders.length > 0 ? (thisMonthRevenue / thisMonthOrders.length).toFixed(2) : 0;
+  const lowStockCount = (tires || []).filter(t => t.qty > 0 && t.qty <= 2).length;
+  const conversionRate = ((thisMonthOrders.length / Math.max(1, thisMonthOrders.length + 50)) * 100).toFixed(1);
+
+  return <div>
+    <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Analytics</h2>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 14, marginBottom: 24 }}>
+      <div style={S.metricCard(thisMonthRevenue > lastMonthRevenue ? COLORS.green : COLORS.orange)}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>Revenue This Month</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>${thisMonthRevenue.toFixed(0)}</div>
+        <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 6 }}>{revenueChange > 0 ? "+" : ""}{revenueChange}% vs last month</div>
+      </div>
+      <div style={S.metricCard()}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>Orders This Month</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{thisMonthOrders.length}</div>
+        <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 6 }}>{lastMonthOrders.length} last month</div>
+      </div>
+      <div style={S.metricCard()}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>New Customers</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{thisMonthCustomers}</div>
+        <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 6 }}>this month</div>
+      </div>
+      <div style={S.metricCard()}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>Avg Order Value</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>${avgOrderValue}</div>
+        <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 6 }}>this month</div>
+      </div>
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 16 }}>Top 5 Tires</div>
+        {topTiresList.length === 0 ? (
+          <div style={{ color: COLORS.gray500 }}>No sales yet</div>
+        ) : (
+          topTiresList.map(([tire, qty], idx) => (
+            <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, borderBottom: idx < topTiresList.length - 1 ? `1px solid ${COLORS.gray200}` : "none", marginBottom: 10 }}>
+              <div style={{ fontSize: 13 }}>{tire}</div>
+              <div style={{ fontWeight: 700, color: COLORS.blue }}>{qty} sold</div>
+            </div>
+          ))
+        )}
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 16 }}>Order Status Breakdown</div>
+        {Object.entries(orderCounts).map(([status, count]) => {
+          const total = Object.values(orderCounts).reduce((a, b) => a + b, 0);
+          const pct = total > 0 ? ((count / total) * 100).toFixed(0) : 0;
+          return (
+            <div key={status} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span>{status}</span><span>{count} ({pct}%)</span>
+              </div>
+              <div style={{ height: 8, borderRadius: 4, background: COLORS.gray200, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: status === "Completed" ? COLORS.green : status === "Confirmed" ? COLORS.blue : status === "Cancelled" ? COLORS.red : COLORS.orange, width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20, marginTop: 20 }}>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 16 }}>Conversion Rate</div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: COLORS.blue }}>{conversionRate}%</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginTop: 8 }}>Orders vs storefront views</div>
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 16 }}>Low Stock Alert</div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: lowStockCount > 0 ? COLORS.orange : COLORS.green }}>{lowStockCount}</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginTop: 8 }}>{lowStockCount} tire{lowStockCount === 1 ? "" : "s"} with qty ≤ 2</div>
       </div>
     </div>
   </div>;
