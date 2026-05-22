@@ -2342,8 +2342,57 @@ function PromotionsPage({ shopId, showToast }) {
   </div>;
 }
 
-function AnalyticsPage({ shopId, orders, tires, customers, showToast }) {
+function AnalyticsPage({ shopId, showToast }) {
   const isMobile = useWindowWidth() < 768;
+  const [loading, setLoading] = useState(true);
+  const [analyticsOrders, setAnalyticsOrders] = useState([]);
+  const [analyticsTires, setAnalyticsTires] = useState([]);
+  const [analyticsCustomers, setAnalyticsCustomers] = useState([]);
+
+  useEffect(() => {
+    if (!shopId) {
+      setLoading(false);
+      return;
+    }
+    let mounted = true;
+    const loadAnalytics = async () => {
+      setLoading(true);
+      try {
+        const [ordersResponse, tiresResponse, customersResponse] = await Promise.all([
+          supabase.from("orders").select("*").eq("shop_id", shopId),
+          supabase.from("tires").select("*").eq("shop_id", shopId),
+          supabase.from("customers").select("*").eq("shop_id", shopId),
+        ]);
+
+        if (!mounted) return;
+
+        if (ordersResponse.error || tiresResponse.error || customersResponse.error) {
+          console.error("Analytics fetch error", ordersResponse.error || tiresResponse.error || customersResponse.error);
+          showToast("Unable to load analytics data.");
+        }
+
+        setAnalyticsOrders((ordersResponse.data || []).map(orderFromSupabaseRow));
+        setAnalyticsTires((tiresResponse.data || []).map(tireFromSupabaseRow));
+        setAnalyticsCustomers((customersResponse.data || []).map(customerFromSupabaseRow));
+      } catch (error) {
+        console.error("Analytics fetch exception", error);
+        if (mounted) showToast("Unable to load analytics data.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadAnalytics();
+    return () => { mounted = false; };
+  }, [shopId, showToast]);
+
+  if (loading) {
+    return <div style={{ ...S.card, padding: 24, marginTop: 20, textAlign: "center" }}>
+      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Loading analytics…</div>
+      <div style={{ fontSize: 14, color: COLORS.gray500 }}>Fetching orders, tires, and customers for your shop.</div>
+    </div>;
+  }
+
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
@@ -2351,11 +2400,11 @@ function AnalyticsPage({ shopId, orders, tires, customers, showToast }) {
   const lastMonthEnd = new Date(currentYear, currentMonth, 0);
   const currentMonthStart = new Date(currentYear, currentMonth, 1);
 
-  const thisMonthOrders = orders.filter(o => {
+  const thisMonthOrders = analyticsOrders.filter(o => {
     const d = new Date(o.created_at || o.date);
     return d >= currentMonthStart && d < new Date(currentYear, currentMonth + 1, 1);
   });
-  const lastMonthOrders = orders.filter(o => {
+  const lastMonthOrders = analyticsOrders.filter(o => {
     const d = new Date(o.created_at || o.date);
     return d >= lastMonthStart && d <= lastMonthEnd;
   });
@@ -2365,25 +2414,25 @@ function AnalyticsPage({ shopId, orders, tires, customers, showToast }) {
   const revenueChange = lastMonthRevenue > 0 ? (((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100).toFixed(1) : 0;
 
   const orderCounts = {};
-  (orders || []).forEach(o => {
+  (analyticsOrders || []).forEach(o => {
     const status = o.status || "Pending";
     orderCounts[status] = (orderCounts[status] || 0) + 1;
   });
 
   const topTires = {};
-  (orders || []).forEach(o => {
+  (analyticsOrders || []).forEach(o => {
     const tire = o.tire || "Unknown";
     topTires[tire] = (topTires[tire] || 0) + (o.qty || 1);
   });
   const topTiresList = Object.entries(topTires).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  const thisMonthCustomers = customers.filter(c => {
+  const thisMonthCustomers = analyticsCustomers.filter(c => {
     const d = new Date(c.created_at);
     return d >= currentMonthStart && d < new Date(currentYear, currentMonth + 1, 1);
   }).length;
 
   const avgOrderValue = thisMonthOrders.length > 0 ? (thisMonthRevenue / thisMonthOrders.length).toFixed(2) : 0;
-  const lowStockCount = (tires || []).filter(t => t.qty > 0 && t.qty <= 2).length;
+  const lowStockCount = (analyticsTires || []).filter(t => t.qty > 0 && t.qty <= 2).length;
   const conversionRate = ((thisMonthOrders.length / Math.max(1, thisMonthOrders.length + 50)) * 100).toFixed(1);
 
   return <div>
