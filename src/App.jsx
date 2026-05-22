@@ -484,7 +484,7 @@ function InvitePage({ nav }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ shopName: "", ownerName: "", phone: "", email: "", address: "", city: "", state: "", locations: "1", website: "", tireType: "Both", inventory: "", currentMethod: "Spreadsheets", online: "No", installation: "Yes", features: [], notes: "" });
+  const [form, setForm] = useState({ shopName: "", ownerName: "", phone: "", email: "", address: "", city: "", state: "", locations: "1", website: "", referralCode: "", tireType: "Both", inventory: "", currentMethod: "Spreadsheets", online: "No", installation: "Yes", features: [], notes: "" });
   const features = ["Online tire storefront","Inventory management","Online ordering","Appointment booking","Payments/deposits","AI chatbot","SEO/local marketing"];
   const set = (k, v) => setForm(f => ({...f, [k]: v}));
   const toggleFeat = f => set("features", form.features.includes(f) ? form.features.filter(x => x !== f) : [...form.features, f]);
@@ -511,7 +511,7 @@ function InvitePage({ nav }) {
         </div>
         <div style={{ background: "#fff", borderRadius: 16, padding: "36px 36px" }}>
           <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16 }}>
-            {[["shopName","Shop Name"],["ownerName","Owner Name"],["phone","Phone Number"],["email","Email Address"],["address","Shop Address"],["city","City"],["state","State"],["website","Current Website URL"]].map(([k, l]) => <div key={k} style={!isMobile && (k === "address" || k === "website") ? { gridColumn: "1/-1" } : {}}>
+            {[["shopName","Shop Name"],["ownerName","Owner Name"],["phone","Phone Number"],["email","Email Address"],["address","Shop Address"],["city","City"],["state","State"],["website","Current Website URL"],["referralCode","Referral Code (optional)"]].map(([k, l]) => <div key={k} style={!isMobile && (k === "address" || k === "website" || k === "referralCode") ? { gridColumn: "1/-1" } : {}}>
               <label style={S.label}>{l}</label>
               <input style={S.input} value={form[k]} onChange={e => set(k, e.target.value)} />
             </div>)}
@@ -1182,7 +1182,7 @@ function ShopDashboard({ nav }) {
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
-        {section === "billing" && <ShopBilling plan={shopRecord.plan} status={shopRecord.status} />}
+        {section === "billing" && <ShopBilling shopId={shopId} plan={shopRecord.plan} status={shopRecord.status} />}
       </div>
       {isMobile && (
         <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#0A1628", borderTop: "1px solid rgba(255,255,255,0.1)", zIndex: 100, paddingBottom: "max(6px, env(safe-area-inset-bottom))" }}>
@@ -2610,9 +2610,24 @@ function SmsTermsPage({ nav }) {
   </div>;
 }
 
-function ShopBilling({ plan, status }) {
+function ShopBilling({ shopId, plan, status }) {
+  const [copiedReferral, setCopiedReferral] = useState(false);
   const planDef = LOCAL_PLANS.find(p => p.name === plan) ?? LOCAL_PLANS.find(p => p.name === "Growth Partner");
   const planStatus = status || "Active";
+  const referralCode = String(shopId || "").slice(0, 8).toUpperCase();
+  const referralMessage = `Hey, I use TreadFlow to manage my tire shop online. Use my code ${referralCode} when you apply at www.treadflow.cc and we both get a month free.`;
+  const smsHref = `sms:?body=${encodeURIComponent(referralMessage)}`;
+
+  const copyReferral = async () => {
+    try {
+      await navigator.clipboard.writeText(referralMessage);
+      setCopiedReferral(true);
+      setTimeout(() => setCopiedReferral(false), 2000);
+    } catch (error) {
+      console.warn("Referral copy failed", error);
+    }
+  };
+
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Billing</h2>
     <div style={{ ...S.card, maxWidth: 520, marginBottom: 20 }}>
@@ -2641,6 +2656,24 @@ function ShopBilling({ plan, status }) {
           </li>
         ))}
       </ul>
+    </div>
+    <div style={{ ...S.card, maxWidth: 520, marginTop: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.gray900 }}>Refer a Shop</div>
+          <div style={{ fontSize: 13, color: COLORS.gray500 }}>Refer another tire shop to TreadFlow and get one month free when they sign up.</div>
+        </div>
+        <span style={{ ...S.badge("secondary"), background: COLORS.gray100, color: COLORS.gray700, border: "none" }}>{referralCode}</span>
+      </div>
+      <div style={{ fontSize: 14, color: COLORS.gray700, marginBottom: 14, lineHeight: 1.6 }}>{referralMessage}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <button onClick={copyReferral} style={{ ...S.btn("primary"), minWidth: 160, justifyContent: "center" }}>
+          {copiedReferral ? "Copied!" : "Copy Message"}
+        </button>
+        <a href={smsHref} style={{ ...S.btn("secondary"), minWidth: 160, justifyContent: "center", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+          Share via Text
+        </a>
+      </div>
     </div>
   </div>;
 }
