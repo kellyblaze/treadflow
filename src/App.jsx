@@ -1083,8 +1083,10 @@ function ShopDashboard({ nav }) {
         .eq("user_id", user.id)
         .order("name", { ascending: true });
       if (cancelled) return;
+      console.log('shops loaded:', data, 'error:', error);
       if (error) {
         console.warn("Shop lookup failed:", error);
+
         setShops([]);
         setActiveShop(null);
       } else {
