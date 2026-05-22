@@ -138,24 +138,10 @@ function orderFromSupabaseRow(row) {
     apptDate: null,
     vehicle: "—",
     notes: "",
+    sms_consent: row.sms_consent === true,
     created_at: row.created_at,
     orderLabel,
   };
-}
-
-const MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-
-function formatCustomerRecordDate(created_at) {
-  if (!created_at) return "—";
-  const d = new Date(created_at);
-  return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 10);
-}
-
-function customerVehicleFromRow(row) {
-  const parts = [row.vehicle_year, row.vehicle_make, row.vehicle_model].filter(
-    v => v !== null && v !== undefined && String(v).trim() !== "",
-  );
-  return parts.length ? parts.map(v => String(v).trim()).join(" ") : "—";
 }
 
 function customerFromSupabaseRow(row) {
@@ -1836,8 +1822,8 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
     setOrders(os => os.map(o => (o.id === id ? { ...o, status } : o)));
     showToast(`Order ${status.toLowerCase()}`);
     
-    // Send SMS notifications on status changes
-    if (order?.phone && (status === "Confirmed" || status === "Completed")) {
+    // Send SMS notifications on status changes when customer consented
+    if (order?.phone && order?.sms_consent === true && (status === "Confirmed" || status === "Completed")) {
       let smsMessage = "";
       if (status === "Confirmed") {
         smsMessage = `Your tire order at ${shopName || "our shop"} has been confirmed! We'll see you soon. Reply STOP to unsubscribe.`;
@@ -2139,6 +2125,49 @@ function ShopSettings({ showToast }) {
   </div>;
 }
 
+function SmsTermsPage({ nav }) {
+  return <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: COLORS.gray50, color: COLORS.gray900 }}>
+    <header style={{ background: COLORS.navy, color: "#fff", padding: "24px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 14, textTransform: "uppercase", letterSpacing: "0.12em", opacity: 0.85 }}>TreadFlow</div>
+        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4 }}>SMS Messaging Terms & Conditions</div>
+      </div>
+      <button onClick={() => nav("home")} style={{ ...S.btn("secondary", "sm"), color: "#fff", borderColor: "rgba(255,255,255,0.35)", background: "rgba(255,255,255,0.08)" }}>Home</button>
+    </header>
+    <main style={{ maxWidth: 920, margin: "0 auto", padding: "32px 20px", display: "grid", gap: 24 }}>
+      <div style={{ background: "#fff", borderRadius: 24, padding: 28, boxShadow: "0 20px 50px rgba(15, 23, 42, 0.08)" }}>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>TreadFlow SMS Messaging Terms & Conditions</div>
+        <p style={{ fontSize: 15, lineHeight: 1.75, color: COLORS.gray700, marginBottom: 20 }}>These messages are sent by TreadFlow and participating tire shops to provide order confirmations, appointment reminders, and status updates for tire services and reservations.</p>
+        <div style={{ display: "grid", gap: 18 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Message frequency</div>
+            <div style={{ color: COLORS.gray700, lineHeight: 1.6 }}>Message frequency varies based on order activity, appointment scheduling, and status updates.</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Rates</div>
+            <div style={{ color: COLORS.gray700, lineHeight: 1.6 }}>Message and data rates may apply according to your carrier plan.</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Opt-out</div>
+            <div style={{ color: COLORS.gray700, lineHeight: 1.6 }}>Reply STOP to unsubscribe at any time.</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Help</div>
+            <div style={{ color: COLORS.gray700, lineHeight: 1.6 }}>Reply HELP for help.</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Support</div>
+            <div style={{ color: COLORS.gray700, lineHeight: 1.6 }}>Support email: <a href="mailto:support@treadflow.cc" style={{ color: COLORS.blue }}>support@treadflow.cc</a></div>
+          </div>
+        </div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <button onClick={() => nav("home")} style={{ ...S.btn("primary", "lg"), width: "100%", maxWidth: 240 }}>Return to Home</button>
+      </div>
+    </main>
+  </div>;
+}
+
 function ShopBilling({ plan, status }) {
   const planDef = LOCAL_PLANS.find(p => p.name === plan) ?? LOCAL_PLANS.find(p => p.name === "Growth Partner");
   const planStatus = status || "Active";
@@ -2195,6 +2224,7 @@ async function storefrontSubmitReservation(shopId, {
   email,
   vehicleRaw,
   quantity,
+  smsConsent = false,
   shopName = "TreadFlow Shop",
   ownerPhone = "",
 }) {
@@ -2234,13 +2264,16 @@ async function storefrontSubmitReservation(shopId, {
       quantity: qty,
       total,
       status: "pending",
+      sms_consent: smsConsent,
     })
     .select("id")
     .single();
+
+  // Run in Supabase SQL Editor: alter table orders add column if not exists sms_consent boolean default false;
   if (orderErr) throw orderErr;
   
-  // Send SMS to shop owner about new reservation
-  if (ownerPhone) {
+  // Send SMS to shop owner about new reservation when consent is provided
+  if (ownerPhone && smsConsent === true) {
     const tireName = `${orderTire.brand} ${orderTire.model}`;
     await sendSms(ownerPhone, `New tire reservation from ${name} for ${tireName}. Check your TreadFlow dashboard.`);
   }
@@ -2318,6 +2351,7 @@ function Storefront({ nav }) {
   const [resTime, setResTime] = useState("8:00 AM");
   const [resPayment, setResPayment] = useState("Pay deposit online ($50)");
   const [resNotes, setResNotes] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [savedOrderId, setSavedOrderId] = useState(null);
@@ -2425,6 +2459,18 @@ function Storefront({ nav }) {
               <label style={S.label}>Notes</label>
               <textarea style={{ ...S.input, height: 60, resize: "vertical" }} value={resNotes} onChange={e => setResNotes(e.target.value)} />
             </div>
+            <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "flex-start", gap: 10, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                id="smsConsent"
+                checked={smsConsent}
+                onChange={e => setSmsConsent(e.target.checked)}
+                style={{ marginTop: 3, accentColor: COLORS.blue, width: 16, height: 16, flexShrink: 0 }}
+              />
+              <label htmlFor="smsConsent" style={{ fontSize: 13, color: COLORS.gray600, lineHeight: 1.5, cursor: "pointer" }}>
+                I agree to receive text message updates about my order from this shop. Message and data rates may apply. Reply STOP to unsubscribe. <a href="/sms-terms" target="_blank" style={{ color: COLORS.blue }}>SMS Terms</a>
+              </label>
+            </div>
           </div>
           {orderError ? (
             <div style={{ marginTop: 14, padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: COLORS.red, fontSize: 14 }}>
@@ -2444,6 +2490,10 @@ function Storefront({ nav }) {
                 setOrderError("Please fill in your full name, phone, email, and vehicle.");
                 return;
               }
+              if (!smsConsent) {
+                setOrderError("Please agree to receive SMS updates before submitting your reservation.");
+                return;
+              }
               setOrderSubmitting(true);
               
               // Handle deposit collection via Stripe
@@ -2458,6 +2508,7 @@ function Storefront({ nav }) {
                     email,
                     vehicleRaw,
                     quantity: resQuantity,
+                    smsConsent,
                     shopName: publicShopInfo.name,
                     ownerPhone: publicShopInfo.phone,
                   }));
@@ -2475,6 +2526,7 @@ function Storefront({ nav }) {
                   email,
                   vehicleRaw,
                   quantity: resQuantity,
+                  smsConsent,
                   shopName: publicShopInfo.name,
                   ownerPhone: publicShopInfo.phone,
                 });
@@ -2958,7 +3010,7 @@ export default function App() {
   const navBar = (
     <div style={{ background: COLORS.navy, padding: "10px 20px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontFamily: "system-ui, sans-serif" }}>
       <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginRight: 4 }}>Navigate:</span>
-      {[["home","🌐 Public Site"],["login","🔐 Login"],["signup","✨ Sign Up"],["invite","📝 Request Invite"],["market","📍 Market Check"],["onboarding","🔑 Invite Onboarding"],["admin","🛠 Super Admin"],["shop","🏪 Shop Dashboard"],["storefront","🛞 Shop Storefront"]].map(([p, l]) => <button key={p} onClick={() => nav(p)} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 6, cursor: "pointer", background: page === p ? COLORS.blue : "rgba(255,255,255,0.1)", color: "#fff", border: "none", fontWeight: page === p ? 700 : 400 }}>{l}</button>)}
+      {[["home","🌐 Public Site"],["login","🔐 Login"],["signup","✨ Sign Up"],["invite","📝 Request Invite"],["market","📍 Market Check"],["onboarding","🔑 Invite Onboarding"],["admin","🛠 Super Admin"],["shop","🏪 Shop Dashboard"],["storefront","🛞 Shop Storefront"],["sms-terms","💬 SMS Terms"]].map(([p, l]) => <button key={p} onClick={() => nav(p)} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 6, cursor: "pointer", background: page === p ? COLORS.blue : "rgba(255,255,255,0.1)", color: "#fff", border: "none", fontWeight: page === p ? 700 : 400 }}>{l}</button>)}
     </div>
   );
 
@@ -2973,6 +3025,7 @@ export default function App() {
       {page === "admin" && <SuperAdmin nav={nav} />}
       {page === "shop" && (authReady ? (session ? <ShopDashboard nav={nav} /> : <LoginPage nav={nav} />) : <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>Loading...</div>)}
       {page === "storefront" && <Storefront nav={nav} />}
+      {page === "sms-terms" && <SmsTermsPage nav={nav} />}
     </div>
   );
 }
