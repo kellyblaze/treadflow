@@ -6,6 +6,25 @@ const redirectToCheckout = (paymentLink) => {
   if (!paymentLink) { alert("No payment link found!"); return; }
   window.location.href = paymentLink;
 };
+
+const sendSms = async (to, message) => {
+  try {
+    const res = await fetch("/api/send-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, message }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      console.warn("SMS send failed:", err);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("SMS error:", e);
+    return false;
+  }
+};
   
 const COLORS = {
   navy: "#0A1628",
@@ -1816,12 +1835,44 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
     }
     setOrders(os => os.map(o => (o.id === id ? { ...o, status } : o)));
     showToast(`Order ${status.toLowerCase()}`);
+    
+    // Send SMS notifications on status changes
+    if (order?.phone && (status === "Confirmed" || status === "Completed")) {
+      let smsMessage = "";
+      if (status === "Confirmed") {
+        smsMessage = `Your tire order at ${shopName || "our shop"} has been confirmed! We'll see you soon. Reply STOP to unsubscribe.`;
+      } else if (status === "Completed") {
+        smsMessage = `Your tire order at ${shopName || "our shop"} is complete. Thank you for your business! Reply STOP to unsubscribe.`;
+      }
+      await sendSms(order.phone, smsMessage);
+    }
+    
+    // Send email notifications
     if (order?.email && (status === "Confirmed" || status === "Completed")) {
       try {
         const { subject, html } = orderStatusUpdate(order.customer, order.tire, status, shopName || "Your tire shop", shopPhone || "");
         await sendEmail(order.email, subject, html);
       } catch (e) {
         console.warn("order status email:", e);
+      }
+    }
+    
+    // Send Google reviews email on completion
+    if (order?.email && status === "Completed") {
+      try {
+        const googleReviewUrl = ""; // TODO: get from shop settings
+        const reviewEmailHtml = `
+          <p>Hi ${order.customer},</p>
+          <p>Thank you for choosing ${shopName || "our shop"} for your tire service! We appreciate your business.</p>
+          <p>If you had a great experience, we'd love to hear about it! Please take a moment to leave a review.</p>
+          <p><a href="${googleReviewUrl}" style="background: #1E6FD9; color: white; padding: 12px 24px; borderRadius: 8px; textDecoration: none; display: inline-block;">Leave a Google Review</a></p>
+          <p>Thanks for your support!</p>
+        `;
+        if (googleReviewUrl) {
+          await sendEmail(order.email, `How was your experience at ${shopName || "our shop"}?`, reviewEmailHtml);
+        }
+      } catch (e) {
+        console.warn("google reviews email:", e);
       }
     }
   };
@@ -2073,6 +2124,11 @@ function ShopSettings({ showToast }) {
         <button onClick={() => showToast("Settings saved!")} style={S.btn("primary")}>Save Changes</button>
       </div>
       <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Review Settings</div>
+        <div style={{ marginBottom: 12 }}><label style={S.label}>Google Review Link</label><input style={S.input} placeholder="https://g.page/your-shop" defaultValue="" /></div>
+        <button onClick={() => showToast("Settings saved!")} style={S.btn("primary")}>Save Changes</button>
+      </div>
+      <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Business Hours</div>
         {["Monday–Friday","Saturday","Sunday"].map((d, i) => <div key={d} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <span style={{ fontSize: 14, color: COLORS.gray700, width: 120 }}>{d}</span>
@@ -2139,6 +2195,8 @@ async function storefrontSubmitReservation(shopId, {
   email,
   vehicleRaw,
   quantity,
+  shopName = "TreadFlow Shop",
+  ownerPhone = "",
 }) {
   if (!shopId) throw new Error("Missing shop.");
   const qty = Math.max(1, Math.min(99, parseInt(String(quantity), 10) || 1));
@@ -2180,6 +2238,13 @@ async function storefrontSubmitReservation(shopId, {
     .select("id")
     .single();
   if (orderErr) throw orderErr;
+  
+  // Send SMS to shop owner about new reservation
+  if (ownerPhone) {
+    const tireName = `${orderTire.brand} ${orderTire.model}`;
+    await sendSms(ownerPhone, `New tire reservation from ${name} for ${tireName}. Check your TreadFlow dashboard.`);
+  }
+  
   return orderRow.id;
 }
 
@@ -2207,6 +2272,35 @@ function Storefront({ nav }) {
       });
     return () => { cancelled = true; };
   }, []);
+
+  // Handle deposit payment success
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("deposit_success") === "true") {
+      const pending = sessionStorage.getItem("pendingReservation");
+      if (pending) {
+        try {
+          const data = JSON.parse(pending);
+          (async () => {
+            try {
+              const id = await storefrontSubmitReservation(publicShopId, data);
+              setSavedOrderId(id);
+              sessionStorage.removeItem("pendingReservation");
+              // Clean URL
+              window.history.replaceState({}, document.title, window.location.pathname);
+            } catch (e) {
+              console.warn("Post-deposit order error:", e);
+              setOrderError("Order creation failed. Please contact support.");
+            } finally {
+              setOrderSubmitting(false);
+            }
+          })();
+        } catch (e) {
+          console.warn("Pending reservation parse error:", e);
+        }
+      }
+    }
+  }, [publicShopId]);
 
   const [search, setSearch] = useState("");
   const [condFilter, setCondFilter] = useState("All");
@@ -2351,6 +2445,28 @@ function Storefront({ nav }) {
                 return;
               }
               setOrderSubmitting(true);
+              
+              // Handle deposit collection via Stripe
+              if (resPayment === "Pay deposit online ($50)") {
+                const depositLink = import.meta.env.VITE_STRIPE_DEPOSIT_LINK;
+                if (depositLink) {
+                  // Store reservation data temporarily for after payment
+                  sessionStorage.setItem("pendingReservation", JSON.stringify({
+                    orderTire,
+                    name,
+                    phone,
+                    email,
+                    vehicleRaw,
+                    quantity: resQuantity,
+                    shopName: publicShopInfo.name,
+                    ownerPhone: publicShopInfo.phone,
+                  }));
+                  // Redirect to Stripe with return URL
+                  window.location.href = `${depositLink}?return=${encodeURIComponent(window.location.href + "?deposit_success=true")}`;
+                  return;
+                }
+              }
+              
               try {
                 const id = await storefrontSubmitReservation(publicShopId, {
                   orderTire,
@@ -2359,6 +2475,8 @@ function Storefront({ nav }) {
                   email,
                   vehicleRaw,
                   quantity: resQuantity,
+                  shopName: publicShopInfo.name,
+                  ownerPhone: publicShopInfo.phone,
                 });
                 setSavedOrderId(id);
                 const tireName = `${orderTire.brand} ${orderTire.model}`;
