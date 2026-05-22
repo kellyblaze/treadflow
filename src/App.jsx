@@ -1080,7 +1080,7 @@ function ShopDashboard({ nav }) {
       const { data, error } = await supabase
         .from("shops")
         .select("id, name, owner_name, email, city, state, status, plan, slug")
-        .eq("email", user.email)
+        .eq("user_id", user.id)
         .order("name", { ascending: true });
       if (cancelled) return;
       if (error) {
