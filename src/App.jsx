@@ -1262,6 +1262,60 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const transcriptRef = useRef("");
   const skipProcessOnEndRef = useRef(false);
 
+  const handleVoiceTap = async () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceStatus("Voice input not supported on this browser");
+      return;
+    }
+    if (isListening) return;
+    setIsListening(true);
+    setVoiceStatus("Listening...");
+    setVoiceTranscript("");
+    setVoiceError("");
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = async (e) => {
+      const transcript = e.results[0][0].transcript;
+      setVoiceTranscript(transcript);
+      setVoiceStatus("Processing...");
+      setIsListening(false);
+      try {
+        const res = await fetch("/api/parse-tire", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript }),
+        });
+        const parsed = await res.json();
+        setNewTire({
+          brand: parsed.brand || "",
+          model: parsed.model || "",
+          size: parsed.size || "",
+          condition: parsed.condition || "New",
+          qty: parsed.quantity || 1,
+          price: parsed.price || "",
+          type: "All-Season",
+          tread: "",
+          desc: "",
+        });
+        setShowVoiceModal(false);
+        setShowAdd(true);
+        setVoiceStatus("Tap to speak");
+        setVoiceTranscript("");
+      } catch {
+        setVoiceError("Could not parse. Please try again or enter manually.");
+        setVoiceStatus("Tap to speak");
+      }
+    };
+    recognition.onerror = () => {
+      setVoiceStatus("Error listening. Please try again.");
+      setIsListening(false);
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.start();
+  };
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
@@ -1604,6 +1658,19 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       <input style={{ ...S.input, maxWidth: 260 }} placeholder="Search brand, model, size..." value={search} onChange={e => setSearch(e.target.value)} />
       {["All","New","Used"].map(c => <button key={c} onClick={() => setFilterCondition(c)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer", border: `1px solid ${filterCondition === c ? COLORS.blue : COLORS.gray300}`, background: filterCondition === c ? "#EFF6FF" : "#fff", color: filterCondition === c ? COLORS.blue : COLORS.gray600, fontWeight: filterCondition === c ? 600 : 400 }}>{c}</button>)}
     </div>
+    {showVoiceModal && (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+    <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 400, width: "100%", textAlign: "center" }}>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>🎤 Voice Tire Entry</div>
+      <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 24 }}>Say the tire details out loud — brand, size, condition, quantity, and price.</div>
+      <div style={{ fontSize: 14, color: COLORS.gray600, marginBottom: 20, minHeight: 20 }}>{voiceStatus}</div>
+      <button onClick={handleVoiceTap} style={{ width: 80, height: 80, borderRadius: "50%", background: isListening ? COLORS.red : COLORS.blue, border: "none", fontSize: 32, cursor: "pointer", color: "#fff", marginBottom: 20 }}>🎤</button>
+      {voiceTranscript && <div style={{ background: COLORS.gray50, borderRadius: 8, padding: 12, fontSize: 13, color: COLORS.gray700, marginBottom: 16, textAlign: "left" }}><strong>Heard:</strong> {voiceTranscript}</div>}
+      {voiceError && <div style={{ background: "#FEF2F2", borderRadius: 8, padding: 12, fontSize: 13, color: COLORS.red, marginBottom: 16 }}>{voiceError}</div>}
+      <button onClick={() => { setShowVoiceModal(false); setVoiceStatus("Tap to speak"); setVoiceTranscript(""); setVoiceError(""); setIsListening(false); }} style={{ ...S.btn("secondary"), width: "100%", justifyContent: "center" }}>Cancel</button>
+    </div>
+  </div>
+)}
     {showAdd && <div style={{ ...S.card, marginBottom: 20, background: "#F0F7FF", border: "1px solid #93C5FD" }}>
       <div style={{ fontWeight: 700, marginBottom: 14 }}>Add New Tire</div>
       <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 12 }}>
