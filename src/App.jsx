@@ -455,6 +455,7 @@ function LandingPage({ nav }) {
         </div>
       </div>
     </div>
+    
   );
 }
 
@@ -1252,6 +1253,13 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const [voiceError, setVoiceError] = useState("");
   const [voiceSupported, setVoiceSupported] = useState(true);
   const [isListening, setIsListening] = useState(false);
+  const [lowStockItems, setLowStockItems] = useState([]);
+  const [showLowStockBanner, setShowLowStockBanner] = useState(true);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvPreviewRows, setCsvPreviewRows] = useState([]);
+  const [csvErrors, setCsvErrors] = useState([]);
+  const [csvImporting, setCsvImporting] = useState(false);
   const [filterCondition, setFilterCondition] = useState("All");
   const [search, setSearch] = useState("");
   const [newTire, setNewTire] = useState({ brand: "", model: "", size: "", condition: "New", qty: 1, price: "", type: "All-Season", tread: "", desc: "" });
@@ -1317,6 +1325,91 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     };
     recognition.onend = () => setIsListening(false);
     recognition.start();
+  };
+  // CSV import helpers
+  const parseCsvPreview = async (file) => {
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length === 0) return { headers: [], rows: [] };
+    const headers = lines[0].split(",").map(h => h.trim());
+    const rows = lines.slice(1).map(l => l.split(",").map(c => c.trim()));
+    return { headers, rows };
+  };
+
+  const handleCsvFileChange = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    setCsvFile(f || null);
+    setCsvErrors([]);
+    setCsvPreviewRows([]);
+    if (!f) return;
+    try {
+      const { headers, rows } = await parseCsvPreview(f);
+      const preview = rows.slice(0, 5).map(r => {
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = r[i] ?? "");
+        return obj;
+      });
+      setCsvPreviewRows(preview);
+    } catch (err) {
+      setCsvErrors(["Could not read CSV file"]);
+    }
+  };
+
+  const downloadCsvTemplate = () => {
+    const headers = ["brand","model","size","condition","quantity","price"];
+    const sample = ["Michelin","Defender T+H","225/55R17","New",4,139.99];
+    const csv = `${headers.join(",")}\n${sample.join(",")}`;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tire-import-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const importCsv = async () => {
+    if (!csvFile) return setCsvErrors(["No file selected"]);
+    setCsvImporting(true);
+    setCsvErrors([]);
+    try {
+      const text = await csvFile.text();
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) { setCsvErrors(["CSV has no data rows"]); setCsvImporting(false); return; }
+      const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+      const required = ["brand","size","price"];
+      const toInsert = [];
+      const errors = [];
+      lines.slice(1).forEach((ln, idx) => {
+        const cols = ln.split(",").map(c => c.trim());
+        const row = {};
+        headers.forEach((h,i) => row[h] = cols[i] ?? "");
+        const rowNum = idx + 2;
+        // validate
+        for (const r of required) {
+          if (!row[r]) { errors.push(`Row ${rowNum}: missing ${r}`); return; }
+        }
+        const quantity = Number(row.quantity || 1);
+        const price = Number(row.price || 0);
+        if (Number.isNaN(price)) { errors.push(`Row ${rowNum}: invalid price`); return; }
+        toInsert.push({ brand: row.brand, model: row.model || "", size: row.size, condition: row.condition || "New", quantity, price, shop_id: shopId, status: 'Active' });
+      });
+      if (errors.length) { setCsvErrors(errors); setCsvImporting(false); return; }
+      if (toInsert.length === 0) { setCsvErrors(["No valid rows to import"]); setCsvImporting(false); return; }
+      const { data, error } = await supabase.from('tires').insert(toInsert);
+      if (error) { setCsvErrors([error.message || 'Import failed']); setCsvImporting(false); return; }
+      // append to local list
+      setTires(ts => [...(ts||[]), ...((data||[]).map(tireFromSupabaseRow))]);
+      showToast(`Imported ${data.length} tires`);
+      setShowCsvModal(false);
+      setCsvFile(null);
+      setCsvPreviewRows([]);
+    } catch (err) {
+      setCsvErrors([err.message || 'Import failed']);
+    }
+    setCsvImporting(false);
   };
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {
@@ -1451,7 +1544,11 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
         showToast(error.message);
         return;
       }
-      setTires((data || []).map(tireFromSupabaseRow));
+      const mapped = (data || []).map(tireFromSupabaseRow);
+      setTires(mapped);
+      // compute low stock items (qty <= 2 and Active)
+      const low = mapped.filter(t => Number(t.qty) <= 2 && String(t.status).toLowerCase() === "active");
+      setLowStockItems(low.map(t => ({ id: t.id, label: `${t.brand} ${t.model} ${t.size}`, qty: Number(t.qty) })));
     })();
     return () => { cancelled = true; };
  }, [shopId]);
@@ -1570,11 +1667,19 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <div><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Inventory</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>{tires.reduce((a, t) => a + t.qty, 0)} total tires in stock</p></div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-        <button type="button" onClick={() => showToast("CSV upload dialog opened")} style={S.btn("secondary")}>📤 CSV Upload</button>
+        <button type="button" onClick={() => setShowCsvModal(true)} style={S.btn("secondary")}>📤 CSV Upload</button>
         <button type="button" onClick={() => setShowVoiceModal(true)} style={S.btn("secondary")}>🎤 Voice Add</button>
         <button type="button" onClick={() => setShowAdd(true)} style={S.btn("primary")}>+ Add Tire</button>
       </div>
     </div>
+    {showLowStockBanner && lowStockItems && lowStockItems.length > 0 && (
+      <div style={{ background: "#FFFBEB", border: `1px solid ${COLORS.yellow}`, padding: 12, borderRadius: 8, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ color: COLORS.gray700, fontSize: 14 }}>
+          <strong>⚠️ Low Stock:</strong>&nbsp;{lowStockItems.map(i => `${i.label} (${i.qty} left)`).join(", ")}
+        </div>
+        <button onClick={() => setShowLowStockBanner(false)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer" }}>✕</button>
+      </div>
+    )}
     <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
       <input style={{ ...S.input, maxWidth: 260 }} placeholder="Search brand, model, size..." value={search} onChange={e => setSearch(e.target.value)} />
       {["All","New","Used"].map(c => <button key={c} onClick={() => setFilterCondition(c)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer", border: `1px solid ${filterCondition === c ? COLORS.blue : COLORS.gray300}`, background: filterCondition === c ? "#EFF6FF" : "#fff", color: filterCondition === c ? COLORS.blue : COLORS.gray600, fontWeight: filterCondition === c ? 600 : 400 }}>{c}</button>)}
@@ -1592,6 +1697,33 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     </div>
   </div>
 )}
+    {showCsvModal && (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+    <div style={{ background: "#fff", borderRadius: 12, padding: 20, maxWidth: 720, width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>Import Inventory CSV</div>
+        <button onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvPreviewRows([]); setCsvErrors([]); }} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>✕</button>
+      </div>
+      <div style={{ marginBottom: 12, color: COLORS.gray600 }}>Expected format: <code>brand, model, size, condition, quantity, price</code>. First row should be headers.</div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+        <input type="file" accept=".csv" onChange={handleCsvFileChange} />
+        <button onClick={downloadCsvTemplate} style={S.btn("ghost")}>Download Template</button>
+        <button onClick={importCsv} style={S.btn("primary")} disabled={csvImporting}>{csvImporting ? "Importing..." : "Import"}</button>
+      </div>
+      {csvErrors.length > 0 && <div style={{ background: "#FFF7ED", border: `1px solid ${COLORS.yellow}`, padding: 10, borderRadius: 8, marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Errors</div>
+        {csvErrors.map((e, i) => <div key={i} style={{ fontSize: 13, color: COLORS.gray700 }}>{e}</div>)}
+      </div>}
+      {csvPreviewRows.length > 0 && <div style={{ maxHeight: 240, overflow: "auto", border: `1px solid ${COLORS.gray200}`, borderRadius: 8 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{Object.keys(csvPreviewRows[0]||{}).map(h => <th key={h} style={{ textAlign: "left", padding: "8px 12px", background: COLORS.gray50 }}>{h}</th>)}</tr></thead>
+          <tbody>{csvPreviewRows.map((r, i) => <tr key={i}>{Object.keys(r).map(k => <td key={k} style={{ padding: "8px 12px", borderTop: `1px solid ${COLORS.gray200}` }}>{r[k]}</td>)}</tr>)}</tbody>
+        </table>
+      </div>}
+    </div>
+  </div>
+)}
+
     {showAdd && <div style={{ ...S.card, marginBottom: 20, background: "#F0F7FF", border: "1px solid #93C5FD" }}>
       <div style={{ fontWeight: 700, marginBottom: 14 }}>Add New Tire</div>
       <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 12 }}>
@@ -1740,6 +1872,9 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
 function AppointmentsPage({ shopId, showToast }) {
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointments, setAppointments] = useState([]);
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
+  const [currentMonth, setCurrentMonth] = useState(() => new Date());
+  const [selectedDate, setSelectedDate] = useState(null);
 
   useEffect(() => {
     if (!shopId) return;
@@ -1762,37 +1897,92 @@ function AppointmentsPage({ shopId, showToast }) {
     return () => { cancelled = true; };
   }, [shopId]);
 
+  const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+  const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  const monthDays = () => {
+    const start = startOfMonth(currentMonth);
+    const end = endOfMonth(currentMonth);
+    const days = [];
+    for (let i = 1; i <= end.getDate(); i++) days.push(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i));
+    return days;
+  };
+
+  const apptsByDate = appointments.reduce((acc, a) => { acc[a.dateIso] = acc[a.dateIso] || []; acc[a.dateIso].push(a); return acc; }, {});
+
   return <div>
-    <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Appointments</h2>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Appointments</h2>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => setViewMode('list')} style={{ ...S.btn(viewMode === 'list' ? 'primary' : 'ghost'), padding: '8px 12px' }}>List</button>
+        <button onClick={() => setViewMode('calendar')} style={{ ...S.btn(viewMode === 'calendar' ? 'primary' : 'ghost'), padding: '8px 12px' }}>Calendar</button>
+      </div>
+    </div>
+
     {appointmentsLoading && (
       <div style={{ ...S.card, padding: "48px 24px", textAlign: "center", color: COLORS.gray500, fontSize: 15 }}>
         Loading appointments…
       </div>
     )}
-    {!appointmentsLoading && (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {appointments.map(a => <div key={a.id} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", gap: 16, alignItems: "center", flex: 1, minWidth: 0 }}>
-          <div style={{ background: COLORS.blue, color: "#fff", borderRadius: 10, padding: "10px 14px", textAlign: "center", minWidth: 60, flexShrink: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 600 }}>{a.monthLabel}</div>
-            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{a.day}</div>
+
+    {!appointmentsLoading && viewMode === 'list' && (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {appointments.map(a => <div key={a.id} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flex: 1, minWidth: 0 }}>
+            <div style={{ background: COLORS.blue, color: "#fff", borderRadius: 10, padding: "10px 14px", textAlign: "center", minWidth: 60, flexShrink: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600 }}>{a.monthLabel}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{a.day}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>{a.dateIso}{a.time ? ` · ${a.time}` : ""}</div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{a.customerName}</div>
+              <div style={{ fontSize: 13, color: COLORS.gray600 }}>{[a.customerPhone, a.customerEmail].filter(Boolean).join(" · ") || "—"}</div>
+              <div style={{ fontSize: 14, color: COLORS.gray500, marginTop: 4 }}><strong style={{ color: COLORS.gray700 }}>Vehicle:</strong> {a.vehicle}</div>
+            </div>
           </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>
-              {a.dateIso}{a.time ? ` · ${a.time}` : ""}
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>{a.customerName}</div>
-            <div style={{ fontSize: 13, color: COLORS.gray600 }}>
-              {[a.customerPhone, a.customerEmail].filter(Boolean).join(" · ") || "—"}
-            </div>
-            <div style={{ fontSize: 14, color: COLORS.gray500, marginTop: 4 }}><strong style={{ color: COLORS.gray700 }}>Vehicle:</strong> {a.vehicle}</div>
+          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
+            <span style={S.badge(a.status)}>{a.status}</span>
+          </div>
+        </div>)}
+      </div>
+    )}
+
+    {!appointmentsLoading && viewMode === 'calendar' && (
+      <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ width: '60%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <button onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} style={S.btn('ghost')}>Previous</button>
+            <div style={{ fontWeight: 700 }}>{currentMonth.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</div>
+            <button onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))} style={S.btn('ghost')}>Next</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
+            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d} style={{ textAlign: 'center', fontSize: 12, color: COLORS.gray500 }}>{d}</div>)}
+            {Array(startOfMonth(currentMonth).getDay()).fill(0).map((_,i) => <div key={`b${i}`} />)}
+            {monthDays().map(d => {
+              const iso = d.toISOString().slice(0,10);
+              const count = (apptsByDate[iso] || []).length;
+              return (
+                <div key={iso} onClick={() => setSelectedDate(iso)} style={{ padding: 10, borderRadius: 8, cursor: 'pointer', background: selectedDate === iso ? '#EFF6FF' : '#fff', border: `1px solid ${COLORS.gray200}`, minHeight: 72, position: 'relative' }}>
+                  <div style={{ fontWeight: 700 }}>{d.getDate()}</div>
+                  {count > 0 && <div style={{ position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: '50%', background: COLORS.blue }} />}
+                  {count > 0 && <div style={{ position: 'absolute', left: 8, top: 8, background: COLORS.blue, color: '#fff', borderRadius: 8, padding: '2px 6px', fontSize: 11 }}>{count}</div>}
+                </div>
+              );
+            })}
           </div>
         </div>
-        <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
-          <span style={S.badge(a.status)}>{a.status}</span>
+        <div style={{ width: '40%' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>{selectedDate ? `Appointments for ${selectedDate}` : 'Select a day'}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(apptsByDate[selectedDate] || []).map(a => (
+              <div key={a.id} style={{ ...S.card }}>
+                <div style={{ fontWeight: 700 }}>{a.customerName}</div>
+                <div style={{ fontSize: 13, color: COLORS.gray500 }}>{a.time || 'All day'} · {a.vehicle}</div>
+                <div style={{ marginTop: 6 }}><span style={S.badge(a.status)}>{a.status}</span></div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>)}
-    </div>
+      </div>
     )}
   </div>;
 }
