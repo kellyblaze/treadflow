@@ -1108,7 +1108,7 @@ function ShopDashboard({ nav }) {
   const shopLocationLine = activeShop ? [activeShop.city, activeShop.state].filter(Boolean).join(", ") : "";
 
   const sidebar = [
-    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["analytics","📈","Analytics"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
+    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["mobile","🚗","Mobile"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["analytics","📈","Analytics"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
   ];
 
   const handleLogout = async () => {
@@ -1196,11 +1196,12 @@ function ShopDashboard({ nav }) {
         {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
         {section === "orders" && <OrdersPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
+        {section === "mobile" && <MobileJobsPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
         {section === "analytics" && <AnalyticsPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
-        {section === "settings" && <ShopSettings showToast={showToast} />}
+        {section === "settings" && <ShopSettings shopId={shopId} showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
         {section === "billing" && <ShopBilling shopId={shopId} plan={activeShop?.plan} status={activeShop?.status} />}
       </div>
@@ -2085,6 +2086,132 @@ function AppointmentsPage({ shopId, showToast }) {
   </div>;
 }
 
+function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
+  const isMobile = useWindowWidth() < 768;
+  const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [statusUpdating, setStatusUpdating] = useState(false);
+
+  const loadJobs = useCallback(async () => {
+    if (!shopId) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("orders")
+      .select("id, customer_name, customer_phone, service_address, mobile_time_slot, mobile_date, quantity, total, status, created_at")
+      .eq("shop_id", shopId)
+      .eq("is_mobile", true)
+      .eq("mobile_date", selectedDate)
+      .order("mobile_time_slot", { ascending: true });
+    setLoading(false);
+    if (error) {
+      showToast(error.message || "Unable to load mobile jobs.");
+      return;
+    }
+    setJobs((data || []).map(row => ({
+      id: row.id,
+      customerName: row.customer_name,
+      customerPhone: row.customer_phone,
+      serviceAddress: row.service_address,
+      mobileTimeSlot: row.mobile_time_slot,
+      mobileDate: row.mobile_date,
+      quantity: Number(row.quantity || 0),
+      total: Number(row.total || 0),
+      status: row.status || "Pending",
+    })));
+  }, [shopId, selectedDate, showToast]);
+
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
+
+  const slotCounts = jobs.reduce((acc, job) => {
+    if (!job.mobileTimeSlot) return acc;
+    acc[job.mobileTimeSlot] = (acc[job.mobileTimeSlot] || 0) + 1;
+    return acc;
+  }, {});
+
+  const totalRevenue = jobs.reduce((sum, job) => sum + job.total, 0);
+  const sortedJobs = [...jobs].sort((a, b) => String(a.mobileTimeSlot).localeCompare(b.mobileTimeSlot));
+
+  const updateStatus = async (jobId, newStatus, job) => {
+    if (!jobId) return;
+    setStatusUpdating(true);
+    const { error } = await supabase.from("orders").update({ status: newStatus }).eq("id", jobId);
+    setStatusUpdating(false);
+    if (error) {
+      showToast(error.message || "Unable to update job status.");
+      return;
+    }
+    setJobs(current => current.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
+    if (newStatus === "En Route") {
+      await sendSms(job.customerPhone, `Your TreadFlow mobile tire tech is on the way! Expected arrival: ${job.mobileTimeSlot}. Call us at ${shopPhone} with any questions.`);
+    }
+    if (newStatus === "Completed") {
+      await sendSms(job.customerPhone, `Your mobile tire installation is complete! Thank you for choosing ${shopName}. Reply STOP to unsubscribe.`);
+    }
+  };
+
+  return <div>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "center", gap: 14, marginBottom: 20 }}>
+      <div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Mobile Jobs</h2>
+        <p style={{ color: COLORS.gray500, marginTop: 4 }}>View and manage mobile tire service jobs for {shopName}.</p>
+      </div>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 14, color: COLORS.gray700, marginBottom: 0 }}>Date</label>
+        <input type="date" style={S.input} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
+      </div>
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 14, marginBottom: 18 }}>
+      <div style={S.card}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 8 }}>Total Mobile Jobs</div>
+        <div style={{ fontSize: 28, fontWeight: 800 }}>{jobs.length}</div>
+      </div>
+      <div style={S.card}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 8 }}>Mobile Revenue</div>
+        <div style={{ fontSize: 28, fontWeight: 800 }}>${totalRevenue.toFixed(2)}</div>
+      </div>
+    </div>
+    {loading ? (
+      <div style={{ ...S.card, padding: 24, textAlign: "center", color: COLORS.gray500 }}>Loading mobile jobs…</div>
+    ) : sortedJobs.length === 0 ? (
+      <div style={{ ...S.card, padding: 24, textAlign: "center", color: COLORS.gray500 }}>No mobile jobs scheduled for this date.</div>
+    ) : (
+      <div style={{ display: "grid", gap: 14 }}>
+        {sortedJobs.map(job => {
+          const conflict = slotCounts[job.mobileTimeSlot] > 1;
+          return (
+            <div key={job.id} style={{ ...S.card, borderColor: conflict ? COLORS.red : COLORS.gray200, borderWidth: 1, borderStyle: "solid" }}>
+              <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 260px", isMobile), gap: 14, alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{job.customerName}</div>
+                  <div style={{ display: "grid", gap: 4, color: COLORS.gray600, fontSize: 13 }}>
+                    <div>{job.customerPhone}</div>
+                    <div>{job.serviceAddress}</div>
+                    <div>{job.mobileTimeSlot} · {job.mobileDate}</div>
+                    <div>{job.quantity} tire{job.quantity === 1 ? "" : "s"}</div>
+                  </div>
+                </div>
+                <div style={{ textAlign: isMobile ? "left" : "right" }}>
+                  <div style={S.badge(job.status)}>{job.status}</div>
+                  {conflict && <div style={{ marginTop: 8, color: COLORS.red, fontSize: 13, fontWeight: 600 }}>Time conflict</div>}
+                </div>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end", gap: 10, marginTop: 16 }}>
+                {job.status !== "Confirmed" && job.status !== "Completed" && job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "Confirmed", job)} style={S.btn("primary", "sm")}>Confirm</button>}
+                {job.status !== "En Route" && job.status !== "Completed" && job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "En Route", job)} style={S.btn("secondary", "sm")}>En Route</button>}
+                {job.status !== "Completed" && job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "Completed", job)} style={S.btn("primary", "sm")}>Completed</button>}
+                {job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "Cancelled", job)} style={S.btn("danger", "sm")}>Cancel</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>;
+}
+
 // SQL to create promotions table:
 // create table promotions (
 //   id uuid default gen_random_uuid() primary key,
@@ -2556,8 +2683,60 @@ function StaffPage({ showToast }) {
   </div>;
 }
 
-function ShopSettings({ showToast }) {
+function ShopSettings({ shopId, showToast }) {
   const isMobile = useWindowWidth() < 768;
+  const [mobileServiceEnabled, setMobileServiceEnabled] = useState(false);
+  const [mobileServiceRadius, setMobileServiceRadius] = useState(25);
+  const [mobileServiceFee, setMobileServiceFee] = useState(50);
+  const [mobileServiceHoursStart, setMobileServiceHoursStart] = useState("8:00 AM");
+  const [mobileServiceHoursEnd, setMobileServiceHoursEnd] = useState("6:00 PM");
+  const [savingMobileService, setSavingMobileService] = useState(false);
+
+  useEffect(() => {
+    if (!shopId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("shops")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end")
+        .eq("id", shopId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        showToast(error.message || "Unable to load mobile service settings.");
+        return;
+      }
+      if (!data) return;
+      setMobileServiceEnabled(Boolean(data.mobile_service_enabled));
+      setMobileServiceRadius(data.mobile_service_radius ?? 25);
+      setMobileServiceFee(data.mobile_service_fee ?? 50);
+      setMobileServiceHoursStart(data.mobile_service_hours_start || "8:00 AM");
+      setMobileServiceHoursEnd(data.mobile_service_hours_end || "6:00 PM");
+    })();
+    return () => { cancelled = true; };
+  }, [shopId, showToast]);
+
+  const saveMobileSettings = async () => {
+    if (!shopId) return;
+    setSavingMobileService(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({
+        mobile_service_enabled: mobileServiceEnabled,
+        mobile_service_radius: mobileServiceRadius,
+        mobile_service_fee: mobileServiceFee,
+        mobile_service_hours_start: mobileServiceHoursStart,
+        mobile_service_hours_end: mobileServiceHoursEnd,
+      })
+      .eq("id", shopId);
+    setSavingMobileService(false);
+    if (error) {
+      showToast(error.message || "Unable to save mobile service settings.");
+      return;
+    }
+    showToast("Mobile service settings saved.");
+  };
+
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Shop Settings</h2>
     <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
@@ -2570,6 +2749,39 @@ function ShopSettings({ showToast }) {
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Order Settings</div>
         {[["Tax Rate","7.0%"],["Installation Fee","$25.00"],["Disposal Fee","$5.00"],["Deposit Amount","$50.00"]].map(([l, v]) => <div key={l} style={{ marginBottom: 12 }}><label style={S.label}>{l}</label><input style={S.input} defaultValue={v} /></div>)}
         <button onClick={() => showToast("Settings saved!")} style={S.btn("primary")}>Save Changes</button>
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Mobile Service</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <label style={{ fontWeight: 700, fontSize: 14, margin: 0 }}>Mobile Service</label>
+          <input type="checkbox" checked={mobileServiceEnabled} onChange={e => setMobileServiceEnabled(e.target.checked)} style={{ accentColor: COLORS.blue, width: 18, height: 18 }} />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={S.label}>Service Radius</label>
+          <select style={S.select} value={mobileServiceRadius} onChange={e => setMobileServiceRadius(Number(e.target.value))}>
+            {[10, 15, 25, 50].map(m => <option key={m} value={m}>{m} miles</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={S.label}>Mobile Service Fee</label>
+          <input type="number" style={S.input} value={mobileServiceFee} onChange={e => setMobileServiceFee(Number(e.target.value))} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 14, marginBottom: 12 }}>
+          <div>
+            <label style={S.label}>Hours Start</label>
+            <select style={S.select} value={mobileServiceHoursStart} onChange={e => setMobileServiceHoursStart(e.target.value)}>
+              {["6:00 AM","7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>Hours End</label>
+            <select style={S.select} value={mobileServiceHoursEnd} onChange={e => setMobileServiceHoursEnd(e.target.value)}>
+              {["10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 14 }}>Jobs are scheduled 90 minutes apart minimum.</div>
+        <button onClick={saveMobileSettings} disabled={savingMobileService} style={S.btn("primary")}>{savingMobileService ? "Saving…" : "Save Mobile Service"}</button>
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Review Settings</div>
@@ -2712,6 +2924,46 @@ function parseVehicleFields(vehicleRaw) {
   return { vehicle_year, vehicle_make, vehicle_model };
 }
 
+function parseTimeString(time) {
+  const match = String(time || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const period = match[3].toUpperCase();
+  if (hour === 12) hour = period === "AM" ? 0 : 12;
+  if (period === "PM" && hour < 12) hour += 12;
+  return hour * 60 + minute;
+}
+
+function formatTimeString(totalMinutes) {
+  const hour24 = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  const period = hour24 >= 12 ? "PM" : "AM";
+  let hour = hour24 % 12;
+  if (hour === 0) hour = 12;
+  return `${hour}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+function buildMobileTimeSlots(startTime, endTime) {
+  const start = parseTimeString(startTime) ?? 480;
+  const end = parseTimeString(endTime) ?? 1080;
+  const slots = [];
+  const block = 90;
+  for (let pointer = start; pointer + block <= end; pointer += block) {
+    const startLabel = formatTimeString(pointer);
+    const endLabel = formatTimeString(pointer + block);
+    slots.push(`${startLabel} - ${endLabel}`);
+  }
+  return slots;
+}
+
+// SQL to add mobile service support to shops table:
+// alter table shops add column if not exists mobile_service_enabled boolean default false;
+// alter table shops add column if not exists mobile_service_radius integer default 25;
+// alter table shops add column if not exists mobile_service_fee numeric default 50;
+// alter table shops add column if not exists mobile_service_hours_start text default '8:00 AM';
+// alter table shops add column if not exists mobile_service_hours_end text default '6:00 PM';
+
 async function storefrontSubmitReservation(shopId, {
   orderTire,
   name,
@@ -2722,6 +2974,11 @@ async function storefrontSubmitReservation(shopId, {
   smsConsent = false,
   shopName = "TreadFlow Shop",
   ownerPhone = "",
+  isMobile = false,
+  serviceAddress = "",
+  mobileTimeSlot = "",
+  mobileDate = "",
+  notes = "",
 }) {
   if (!shopId) throw new Error("Missing shop.");
   const qty = Math.max(1, Math.min(99, parseInt(String(quantity), 10) || 1));
@@ -2760,11 +3017,20 @@ async function storefrontSubmitReservation(shopId, {
       total,
       status: "pending",
       sms_consent: smsConsent,
+      is_mobile: isMobile,
+      service_address: serviceAddress,
+      mobile_time_slot: mobileTimeSlot,
+      mobile_date: mobileDate,
+      notes,
     })
     .select("id")
     .single();
 
   // Run in Supabase SQL Editor: alter table orders add column if not exists sms_consent boolean default false;
+  // Run in Supabase SQL Editor: alter table orders add column if not exists is_mobile boolean default false;
+  // Run in Supabase SQL Editor: alter table orders add column if not exists service_address text;
+  // Run in Supabase SQL Editor: alter table orders add column if not exists mobile_time_slot text;
+  // Run in Supabase SQL Editor: alter table orders add column if not exists mobile_date text;
   if (orderErr) throw orderErr;
   
   // Send SMS to shop owner about new reservation when consent is provided
@@ -2781,7 +3047,16 @@ function Storefront({ nav }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
-  const [publicShopInfo, setPublicShopInfo] = useState({ name: storefront.name, email: "" });
+  const [publicShopInfo, setPublicShopInfo] = useState({
+    name: storefront.name,
+    email: "",
+    phone: "",
+    mobile_service_enabled: false,
+    mobile_service_radius: 25,
+    mobile_service_fee: 50,
+    mobile_service_hours_start: "8:00 AM",
+    mobile_service_hours_end: "6:00 PM",
+  });
   const [activePromotion, setActivePromotion] = useState(null);
   const [searchMode, setSearchMode] = useState("size");
   const [vehicleYear, setVehicleYear] = useState("2024");
@@ -2820,7 +3095,7 @@ function Storefront({ nav }) {
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id, name, email")
+      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end")
       .eq("slug", PUBLIC_STOREFRONT_SLUG)
       .maybeSingle()
       .then(({ data }) => {
@@ -2829,6 +3104,12 @@ function Storefront({ nav }) {
         setPublicShopInfo({
           name: data.name || storefront.name,
           email: (data.email || "").trim(),
+          phone: (data.phone || "").trim(),
+          mobile_service_enabled: data.mobile_service_enabled ?? false,
+          mobile_service_radius: data.mobile_service_radius ?? 25,
+          mobile_service_fee: data.mobile_service_fee ?? 50,
+          mobile_service_hours_start: data.mobile_service_hours_start || "8:00 AM",
+          mobile_service_hours_end: data.mobile_service_hours_end || "6:00 PM",
         });
       });
     return () => { cancelled = true; };
@@ -2897,14 +3178,43 @@ function Storefront({ nav }) {
   const [resEmail, setResEmail] = useState("");
   const [resVehicle, setResVehicle] = useState("");
   const [resQuantity, setResQuantity] = useState("1");
-  const [resService, setResService] = useState("Installation at Shop");
+  const [resService, setResService] = useState("shop");
   const [resDate, setResDate] = useState("");
   const [resTime, setResTime] = useState("8:00 AM");
+  const [resServiceAddress, setResServiceAddress] = useState("");
+  const [resMobileTimeSlot, setResMobileTimeSlot] = useState("");
   const [resPayment, setResPayment] = useState("Pay deposit online ($50)");
   const [resNotes, setResNotes] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
+  const [mobileTimeSlots, setMobileTimeSlots] = useState([]);
+  const [mobileTakenSlots, setMobileTakenSlots] = useState([]);
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orderError, setOrderError] = useState("");
+
+  useEffect(() => {
+    setMobileTimeSlots(buildMobileTimeSlots(publicShopInfo.mobile_service_hours_start, publicShopInfo.mobile_service_hours_end));
+  }, [publicShopInfo.mobile_service_hours_start, publicShopInfo.mobile_service_hours_end]);
+
+  useEffect(() => {
+    if (!publicShopId || resService !== "mobile" || !resDate) {
+      setMobileTakenSlots([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("mobile_time_slot")
+        .eq("shop_id", publicShopId)
+        .eq("is_mobile", true)
+        .eq("mobile_date", resDate);
+      if (cancelled) return;
+      if (!error) {
+        setMobileTakenSlots((data || []).map(row => row.mobile_time_slot).filter(Boolean));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [publicShopId, resService, resDate]);
   const [savedOrderId, setSavedOrderId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -2990,20 +3300,43 @@ function Storefront({ nav }) {
             <div>
               <label style={S.label}>Service Type</label>
               <select style={{ ...S.select, width: "100%" }} value={resService} onChange={e => setResService(e.target.value)}>
-                <option>Installation at Shop</option>
-                <option>Pickup Only</option>
+                <option value="shop">Installation at Shop</option>
+                <option value="pickup">Pickup Only</option>
+                {publicShopInfo.mobile_service_enabled && <option value="mobile">Mobile Installation (We Come To You) +${publicShopInfo.mobile_service_fee}</option>}
               </select>
             </div>
             <div>
               <label style={S.label}>Preferred Date</label>
               <input type="date" style={S.input} value={resDate} onChange={e => setResDate(e.target.value)} />
             </div>
-            <div>
-              <label style={S.label}>Preferred Time</label>
-              <select style={{ ...S.select, width: "100%" }} value={resTime} onChange={e => setResTime(e.target.value)}>
-                {["8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "1:00 PM", "2:00 PM", "3:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+            {resService !== "mobile" ? (
+              <div>
+                <label style={S.label}>Preferred Time</label>
+                <select style={{ ...S.select, width: "100%" }} value={resTime} onChange={e => setResTime(e.target.value)}>
+                  {["8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "1:00 PM", "2:00 PM", "3:00 PM"].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            ) : (
+              <>
+                <div style={{ gridColumn: "1/-1" }}>
+                  <label style={S.label}>Service Address</label>
+                  <textarea style={{ ...S.input, height: 80, resize: "vertical" }} value={resServiceAddress} onChange={e => setResServiceAddress(e.target.value)} placeholder="Street, city, zip" />
+                </div>
+                <div style={{ gridColumn: "1/-1" }}>
+                  <label style={S.label}>Preferred Time Window</label>
+                  <select style={{ ...S.select, width: "100%" }} value={resMobileTimeSlot} onChange={e => setResMobileTimeSlot(e.target.value)}>
+                    <option value="">Select a time window</option>
+                    {mobileTimeSlots.map(slot => {
+                      const taken = mobileTakenSlots.includes(slot);
+                      return <option key={slot} value={slot} disabled={taken}>{slot}{taken ? " — Unavailable" : ""}</option>;
+                    })}
+                  </select>
+                </div>
+                <div style={{ gridColumn: "1/-1", color: COLORS.gray500, fontSize: 13 }}>
+                  Our technician will call 30 minutes before arrival. Jobs are scheduled 90 minutes apart minimum.
+                </div>
+              </>
+            )}
             <div style={{ gridColumn: "1/-1" }}>
               <label style={S.label}>Payment Option</label>
               <select style={{ ...S.select, width: "100%" }} value={resPayment} onChange={e => setResPayment(e.target.value)}>
@@ -3051,6 +3384,21 @@ function Storefront({ nav }) {
                 setOrderError("Please agree to receive SMS updates before submitting your reservation.");
                 return;
               }
+              const isMobile = resService === "mobile";
+              if (isMobile) {
+                if (!resServiceAddress.trim()) {
+                  setOrderError("Please provide your service address for mobile installation.");
+                  return;
+                }
+                if (!resMobileTimeSlot) {
+                  setOrderError("Please choose a preferred mobile time window.");
+                  return;
+                }
+                if (!resDate) {
+                  setOrderError("Please choose a date for mobile service.");
+                  return;
+                }
+              }
               setOrderSubmitting(true);
               
               // Handle deposit collection via Stripe
@@ -3068,6 +3416,11 @@ function Storefront({ nav }) {
                     smsConsent,
                     shopName: publicShopInfo.name,
                     ownerPhone: publicShopInfo.phone,
+                    isMobile,
+                    serviceAddress: resServiceAddress,
+                    mobileTimeSlot: resMobileTimeSlot,
+                    mobileDate: resDate,
+                    notes: resNotes,
                   }));
                   // Redirect to Stripe with return URL
                   window.location.href = `${depositLink}?return=${encodeURIComponent(window.location.href + "?deposit_success=true")}`;
@@ -3086,6 +3439,11 @@ function Storefront({ nav }) {
                   smsConsent,
                   shopName: publicShopInfo.name,
                   ownerPhone: publicShopInfo.phone,
+                  isMobile,
+                  serviceAddress: resServiceAddress,
+                  mobileTimeSlot: resMobileTimeSlot,
+                  mobileDate: resDate,
+                  notes: resNotes,
                 });
                 setSavedOrderId(id);
                 const tireName = `${orderTire.brand} ${orderTire.model}`;
