@@ -1338,15 +1338,6 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     }
   }, [clearSilenceTimer]);
 
-  const closeVoiceModal = useCallback(() => {
-    stopVoiceListening(true);
-    setShowVoiceModal(false);
-    setVoiceStatus("Tap to speak");
-    setVoiceTranscript("");
-    setVoiceError("");
-    transcriptRef.current = "";
-  }, [stopVoiceListening]);
-
   const processVoiceTranscript = useCallback(async (text) => {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -1358,8 +1349,13 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     setVoiceError("");
     try {
       const parsed = await parseTireTranscript(trimmed);
+      stopVoiceListening(true);
+      setShowVoiceModal(false);
+      setVoiceStatus("Tap to speak");
+      setVoiceTranscript("");
+      setVoiceError("");
+      transcriptRef.current = "";
       setNewTire(tireFormFromParsedJson(parsed));
-      closeVoiceModal();
       setShowAdd(true);
       showToast("Review pre-filled tire details before saving");
     } catch (err) {
@@ -1367,7 +1363,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       setShowAdd(true);
       setNewTire(t => ({ ...t, desc: trimmed }));
     }
-  }, [closeVoiceModal, showToast]);
+  }, [stopVoiceListening, showToast]);
 
   const startVoiceListening = useCallback(() => {
     const SpeechRecognition = getSpeechRecognitionCtor();
@@ -1435,25 +1431,6 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       setIsListening(false);
     }
   }, [clearSilenceTimer, stopVoiceListening, processVoiceTranscript]);
-
-  const toggleVoiceMic = useCallback(() => {
-    if (!voiceSupported) return;
-    if (listeningRef.current) {
-      stopVoiceListening();
-      return;
-    }
-    startVoiceListening();
-  }, [voiceSupported, startVoiceListening, stopVoiceListening]);
-
-  const openVoiceModal = useCallback(() => {
-    const supported = !!getSpeechRecognitionCtor();
-    setVoiceSupported(supported);
-    setVoiceStatus("Tap to speak");
-    setVoiceTranscript("");
-    setVoiceError(supported ? "" : "Voice input not supported on this browser");
-    transcriptRef.current = "";
-    setShowVoiceModal(true);
-  }, []);
 
   useEffect(() => () => stopVoiceListening(), [stopVoiceListening]);
 
@@ -1593,68 +1570,10 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       <div><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Inventory</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>{tires.reduce((a, t) => a + t.qty, 0)} total tires in stock</p></div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <button type="button" onClick={() => showToast("CSV upload dialog opened")} style={S.btn("secondary")}>📤 CSV Upload</button>
-        <button type="button" onClick={openVoiceModal} style={S.btn("secondary")}>🎤 Voice Add</button>
+        <button type="button" onClick={() => setShowVoiceModal(true)} style={S.btn("secondary")}>🎤 Voice Add</button>
         <button type="button" onClick={() => setShowAdd(true)} style={S.btn("primary")}>+ Add Tire</button>
       </div>
     </div>
-    {showVoiceModal && (
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="voice-add-title"
-        style={{ position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}
-        onClick={e => { if (e.target === e.currentTarget && voiceStatus !== "Processing...") closeVoiceModal(); }}
-      >
-        <div style={{ background: "#fff", borderRadius: 16, padding: "32px 28px", maxWidth: 420, width: "100%", textAlign: "center", boxShadow: "0 20px 50px rgba(0,0,0,0.2)" }}>
-          <h3 id="voice-add-title" style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700, color: COLORS.gray900 }}>Voice Add Tire</h3>
-          <p style={{ margin: "0 0 24px", fontSize: 14, color: COLORS.gray500 }}>Describe the tire — brand, model, size, condition, quantity, and price.</p>
-          <button
-            type="button"
-            onClick={toggleVoiceMic}
-            disabled={!voiceSupported || voiceStatus === "Processing..."}
-            style={{
-              width: 96,
-              height: 96,
-              borderRadius: "50%",
-              border: "none",
-              background: isListening ? COLORS.red : COLORS.blue,
-              color: "#fff",
-              fontSize: 40,
-              cursor: !voiceSupported || voiceStatus === "Processing..." ? "not-allowed" : "pointer",
-              margin: "0 auto 16px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: !voiceSupported || voiceStatus === "Processing..." ? 0.6 : 1,
-            }}
-          >
-            🎤
-          </button>
-          <div style={{ fontSize: 15, fontWeight: 600, color: voiceStatus === "Listening..." ? COLORS.blue : COLORS.gray700, marginBottom: 16 }}>
-            {voiceStatus}
-          </div>
-          <div style={{ background: COLORS.gray50, borderRadius: 10, border: `1px solid ${COLORS.gray200}`, padding: "14px 16px", minHeight: 72, textAlign: "left", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.gray400, marginBottom: 6, textTransform: "uppercase" }}>Transcript</div>
-            <div style={{ fontSize: 14, color: voiceTranscript ? COLORS.gray800 : COLORS.gray400, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-              {voiceTranscript || "Your words will appear here…"}
-            </div>
-          </div>
-          {voiceError && (
-            <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "12px 14px", fontSize: 13, color: COLORS.red, textAlign: "left", marginBottom: 16, lineHeight: 1.5 }}>
-              {voiceError}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={closeVoiceModal}
-            disabled={voiceStatus === "Processing..."}
-            style={{ ...S.btn("secondary"), width: "100%", justifyContent: "center", opacity: voiceStatus === "Processing..." ? 0.6 : 1 }}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    )}
     <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
       <input style={{ ...S.input, maxWidth: 260 }} placeholder="Search brand, model, size..." value={search} onChange={e => setSearch(e.target.value)} />
       {["All","New","Used"].map(c => <button key={c} onClick={() => setFilterCondition(c)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer", border: `1px solid ${filterCondition === c ? COLORS.blue : COLORS.gray300}`, background: filterCondition === c ? "#EFF6FF" : "#fff", color: filterCondition === c ? COLORS.blue : COLORS.gray600, fontWeight: filterCondition === c ? 600 : 400 }}>{c}</button>)}
