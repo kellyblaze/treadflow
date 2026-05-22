@@ -629,6 +629,7 @@ function SuperAdmin({ nav }) {
         <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 12 }}>
           <button onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)" }}>← Public Site</button>
           <button onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)", marginTop: 6 }}>Logout</button>
+      <button onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)", marginTop: 6 }}>Logout</button>    
         </div>
           <button onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)", marginTop: 6 }}>Logout</button>
         </div>
