@@ -1196,7 +1196,7 @@ function ShopDashboard({ nav }) {
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
-        {section === "analytics" && <AnalyticsPage shopId={shopId} orders={orders} tires={tires} customers={customers} showToast={showToast} />}
+        {section === "analytics" && <AnalyticsPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
