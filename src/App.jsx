@@ -1251,6 +1251,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceError, setVoiceError] = useState("");
   const [voiceSupported, setVoiceSupported] = useState(true);
+  const [isListening, setIsListening] = useState(false);
   const [filterCondition, setFilterCondition] = useState("All");
   const [search, setSearch] = useState("");
   const [newTire, setNewTire] = useState({ brand: "", model: "", size: "", condition: "New", qty: 1, price: "", type: "All-Season", tread: "", desc: "" });
