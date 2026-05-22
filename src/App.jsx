@@ -1169,8 +1169,8 @@ function ShopDashboard({ nav }) {
         </div>
         {shops.length > 1 && (
           <div style={{ marginBottom: 18 }}>
-            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 8 }}>Switch shop</label>
-            <select value={activeShop?.id || ""} onChange={e => setActiveShop(shops.find(s => s.id === e.target.value) || activeShop)} style={{ width: "100%", appearance: "none", borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#fff", padding: "10px 12px", fontSize: 13 }}>
+            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.9)", marginBottom: 8, fontWeight: 600 }}>Switch shop</label>
+            <select value={activeShop?.id || ""} onChange={e => setActiveShop(shops.find(s => s.id === e.target.value) || activeShop)} style={{ width: "100%", appearance: "none", borderRadius: 12, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", padding: "10px 12px", fontSize: 13, cursor: "pointer" }}>
               {shops.map(shop => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
             </select>
           </div>
