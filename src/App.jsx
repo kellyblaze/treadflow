@@ -2966,7 +2966,11 @@ function SignUpPage({ nav }) {
 }
 
 export default function App() {
-  const [page, setPage] = useState("home");
+  const [page, setPage] = useState(() => {
+    if (typeof window !== "undefined" && window.location.pathname === "/sms-terms") return "sms-terms";
+    if (typeof window !== "undefined" && window.location.search.includes("deposit_success=true")) return "storefront";
+    return "home";
+  });
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [intendedPage, setIntendedPage] = useState("shop");
