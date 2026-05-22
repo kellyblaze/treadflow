@@ -144,6 +144,21 @@ function orderFromSupabaseRow(row) {
   };
 }
 
+function formatCustomerRecordDate(created_at) {
+  if (!created_at) return "";
+  const d = new Date(created_at);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
+function customerVehicleFromRow(row) {
+  const parts = [];
+  if (row.vehicle_year) parts.push(row.vehicle_year);
+  if (row.vehicle_make) parts.push(row.vehicle_make);
+  if (row.vehicle_model) parts.push(row.vehicle_model);
+  if (parts.length) return parts.join(" ");
+  return row.vehicle || "—";
+}
+
 function customerFromSupabaseRow(row) {
   return {
     id: row.id,
@@ -1257,6 +1272,8 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const [voiceStatus, setVoiceStatus] = useState("Tap to speak");
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceError, setVoiceError] = useState("");
+  const [voiceMode, setVoiceMode] = useState("single");
+  const [pendingTires, setPendingTires] = useState([]);
   const [voiceSupported, setVoiceSupported] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const [lowStockItems, setLowStockItems] = useState([]);
@@ -1279,58 +1296,15 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const skipProcessOnEndRef = useRef(false);
 
   const handleVoiceTap = async () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setVoiceStatus("Voice input not supported on this browser");
+    if (isListening) {
+      stopVoiceListening(true);
+      setVoiceStatus("Tap to speak");
       return;
     }
-    if (isListening) return;
-    setIsListening(true);
-    setVoiceStatus("Listening...");
     setVoiceTranscript("");
     setVoiceError("");
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
-    recognition.onresult = async (e) => {
-      const transcript = e.results[0][0].transcript;
-      setVoiceTranscript(transcript);
-      setVoiceStatus("Processing...");
-      setIsListening(false);
-      try {
-        const res = await fetch("/api/parse-tire", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript }),
-        });
-        const parsed = await res.json();
-        setNewTire({
-          brand: parsed.brand || "",
-          model: parsed.model || "",
-          size: parsed.size || "",
-          condition: parsed.condition || "New",
-          qty: parsed.quantity || 1,
-          price: parsed.price || "",
-          type: "All-Season",
-          tread: "",
-          desc: "",
-        });
-        setShowVoiceModal(false);
-        setShowAdd(true);
-        setVoiceStatus("Tap to speak");
-        setVoiceTranscript("");
-      } catch {
-        setVoiceError("Could not parse. Please try again or enter manually.");
-        setVoiceStatus("Tap to speak");
-      }
-    };
-    recognition.onerror = () => {
-      setVoiceStatus("Error listening. Please try again.");
-      setIsListening(false);
-    };
-    recognition.onend = () => setIsListening(false);
-    recognition.start();
+    setVoiceStatus("Listening...");
+    startVoiceListening();
   };
   // CSV import helpers
   const parseCsvPreview = async (file) => {
@@ -1438,6 +1412,38 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     }
   }, [clearSilenceTimer]);
 
+  const removePendingTire = useCallback((index) => {
+    setPendingTires(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const importPendingTires = async () => {
+    if (pendingTires.length === 0) return;
+    const rows = pendingTires.map(t => ({
+      shop_id: shopId,
+      brand: t.brand,
+      model: t.model,
+      size: t.size,
+      condition: t.condition,
+      quantity: Number(t.qty) || 1,
+      price: Number(t.price) || 0,
+      status: (Number(t.qty) || 1) === 0 ? "Out of Stock" : "Active",
+    }));
+    const { data, error } = await supabase.from('tires').insert(rows).select();
+    if (error) {
+      showToast(error.message || "Could not import tires");
+      return;
+    }
+    setTires(ts => [...ts, ...((data || []).map(tireFromSupabaseRow))]);
+    const count = data.length;
+    setPendingTires([]);
+    showToast(`Successfully imported ${count} tires`);
+  };
+
+  const handleBulkDone = () => {
+    stopVoiceListening(true);
+    setVoiceStatus("Done listening. Review the pending list below.");
+  };
+
   const processVoiceTranscript = useCallback(async (text) => {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -1465,6 +1471,23 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     }
   }, [stopVoiceListening, showToast]);
 
+  const processBulkTranscript = useCallback(async (text) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setVoiceStatus("Processing...");
+    setVoiceError("");
+    try {
+      const parsed = await parseTireTranscript(trimmed);
+      setPendingTires(prev => [...prev, tireFormFromParsedJson(parsed)]);
+      setVoiceStatus("Keep going... say the next tire");
+      setVoiceTranscript("");
+      transcriptRef.current = "";
+    } catch (err) {
+      setVoiceError(err?.message || "Could not parse this tire. Keep talking or try again.");
+      setVoiceStatus("Listening...");
+    }
+  }, []);
+
   const startVoiceListening = useCallback(() => {
     const SpeechRecognition = getSpeechRecognitionCtor();
     if (!SpeechRecognition) {
@@ -1473,24 +1496,32 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       return;
     }
     setVoiceError("");
-    transcriptRef.current = voiceTranscript;
+    transcriptRef.current = "";
     const recognition = new SpeechRecognition();
     recognition.lang = "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
     recognitionRef.current = recognition;
 
-    recognition.onresult = (event) => {
+    recognition.onresult = async (event) => {
       let chunk = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         chunk += event.results[i][0].transcript;
       }
-      transcriptRef.current = `${transcriptRef.current}${chunk}`.trim();
+      transcriptRef.current = `${transcriptRef.current} ${chunk}`.trim();
       setVoiceTranscript(transcriptRef.current);
       clearSilenceTimer();
-      silenceTimerRef.current = setTimeout(() => {
-        if (listeningRef.current) stopVoiceListening();
-      }, 5000);
+      silenceTimerRef.current = window.setTimeout(async () => {
+        if (!listeningRef.current) return;
+        const finalText = transcriptRef.current.trim();
+        if (voiceMode === "bulk") {
+          await processBulkTranscript(finalText);
+          transcriptRef.current = "";
+          setVoiceTranscript("");
+        } else {
+          stopVoiceListening();
+        }
+      }, voiceMode === "bulk" ? 2000 : 5000);
     };
 
     recognition.onerror = (event) => {
@@ -1504,18 +1535,22 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     };
 
     recognition.onend = () => {
-      listeningRef.current = false;
-      setIsListening(false);
-      clearSilenceTimer();
       if (skipProcessOnEndRef.current) {
         skipProcessOnEndRef.current = false;
         setVoiceStatus("Tap to speak");
         return;
       }
+      if (voiceMode === "bulk" && listeningRef.current) {
+        startVoiceListening();
+        return;
+      }
+      listeningRef.current = false;
+      setIsListening(false);
+      clearSilenceTimer();
       const finalText = transcriptRef.current.trim();
-      if (finalText) {
+      if (finalText && voiceMode === "single") {
         processVoiceTranscript(finalText);
-      } else {
+      } else if (!finalText) {
         setVoiceStatus("Tap to speak");
       }
     };
@@ -1530,7 +1565,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
       setVoiceStatus("Tap to speak");
       setIsListening(false);
     }
-  }, [clearSilenceTimer, stopVoiceListening, processVoiceTranscript]);
+  }, [clearSilenceTimer, stopVoiceListening, processVoiceTranscript, processBulkTranscript, voiceMode]);
 
   useEffect(() => () => stopVoiceListening(), [stopVoiceListening]);
 
@@ -1692,14 +1727,40 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     </div>
     {showVoiceModal && (
   <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-    <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 400, width: "100%", textAlign: "center" }}>
+    <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 450, width: "100%", textAlign: "center" }}>
       <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>🎤 Voice Tire Entry</div>
       <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 24 }}>Say the tire details out loud — brand, size, condition, quantity, and price.</div>
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 18 }}>
+        <button type="button" onClick={() => setVoiceMode("single")} style={{ ...S.btn(voiceMode === "single" ? "primary" : "ghost", "sm"), minWidth: 110 }}>Single Tire</button>
+        <button type="button" onClick={() => setVoiceMode("bulk")} style={{ ...S.btn(voiceMode === "bulk" ? "primary" : "ghost", "sm"), minWidth: 110 }}>Bulk Mode</button>
+      </div>
+      <div style={{ fontSize: 14, color: COLORS.gray600, marginBottom: 16, minHeight: 20 }}>{voiceMode === "bulk" ? "Bulk mode listens continuously and adds a tire after 2 seconds of pause." : "Single mode listens for one tire and then stops."}</div>
       <div style={{ fontSize: 14, color: COLORS.gray600, marginBottom: 20, minHeight: 20 }}>{voiceStatus}</div>
-      <button onClick={handleVoiceTap} style={{ width: 80, height: 80, borderRadius: "50%", background: isListening ? COLORS.red : COLORS.blue, border: "none", fontSize: 32, cursor: "pointer", color: "#fff", marginBottom: 20 }}>🎤</button>
+      <button onClick={handleVoiceTap} style={{ width: 80, height: 80, borderRadius: "50%", background: isListening ? COLORS.red : COLORS.blue, border: "none", fontSize: 32, cursor: "pointer", color: "#fff", marginBottom: 20 }}>{isListening ? "⏹" : "🎤"}</button>
       {voiceTranscript && <div style={{ background: COLORS.gray50, borderRadius: 8, padding: 12, fontSize: 13, color: COLORS.gray700, marginBottom: 16, textAlign: "left" }}><strong>Heard:</strong> {voiceTranscript}</div>}
       {voiceError && <div style={{ background: "#FEF2F2", borderRadius: 8, padding: 12, fontSize: 13, color: COLORS.red, marginBottom: 16 }}>{voiceError}</div>}
-      <button onClick={() => { setShowVoiceModal(false); setVoiceStatus("Tap to speak"); setVoiceTranscript(""); setVoiceError(""); setIsListening(false); }} style={{ ...S.btn("secondary"), width: "100%", justifyContent: "center" }}>Cancel</button>
+      {voiceMode === "bulk" && pendingTires.length > 0 && (
+        <div style={{ textAlign: "left", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{pendingTires.length} tire{pendingTires.length === 1 ? "" : "s"} ready to import</div>
+          <div style={{ maxHeight: 180, overflow: "auto", border: `1px solid ${COLORS.gray200}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            {pendingTires.map((item, idx) => (
+              <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: idx < pendingTires.length - 1 ? `1px solid ${COLORS.gray200}` : "none" }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{item.brand} {item.model}</div>
+                  <div style={{ fontSize: 12, color: COLORS.gray500 }}>{item.size} · ${item.price}</div>
+                </div>
+                <button onClick={() => removePendingTire(idx)} style={{ ...S.btn("ghost", "sm") }}>Remove</button>
+              </div>
+            ))}
+          </div>
+          <button onClick={importPendingTires} style={{ ...S.btn("primary"), width: "100%", marginBottom: 10 }} disabled={pendingTires.length === 0}>Import All</button>
+          <button onClick={handleBulkDone} style={{ ...S.btn("secondary"), width: "100%" }}>Done</button>
+        </div>
+      )}
+      {!isListening && voiceMode === "bulk" && pendingTires.length === 0 && (
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 16 }}>Press the mic and speak one or more tire entries. Pause for 2 seconds after each tire to add it to the list.</div>
+      )}
+      <button onClick={() => { setShowVoiceModal(false); setVoiceStatus("Tap to speak"); setVoiceTranscript(""); setVoiceError(""); setIsListening(false); setVoiceMode("single"); setPendingTires([]); }} style={{ ...S.btn("secondary"), width: "100%", justifyContent: "center" }}>Cancel</button>
     </div>
   </div>
 )}
@@ -2003,10 +2064,29 @@ function AppointmentsPage({ shopId, showToast }) {
   </div>;
 }
 
+// SQL to create promotions table:
+// create table promotions (
+//   id uuid default gen_random_uuid() primary key,
+//   shop_id uuid references shops(id),
+//   title text not null,
+//   discount_type text not null,
+//   discount_value numeric not null,
+//   applies_to text not null,
+//   start_date date not null,
+//   end_date date not null,
+//   promo_code text,
+//   active boolean not null default true,
+//   created_at timestamptz default now()
+// );
+
 function CustomersPage({ shopId, showToast }) {
   const isMobile = useWindowWidth() < 768;
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customers, setCustomers] = useState([]);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerOrders, setCustomerOrders] = useState([]);
+  const [customerOrdersLoading, setCustomerOrdersLoading] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -2029,39 +2109,235 @@ function CustomersPage({ shopId, showToast }) {
     return () => { cancelled = true; };
   }, [shopId, showToast]);
 
+  useEffect(() => {
+    if (!shopId || !selectedCustomer?.email) return;
+    let cancelled = false;
+    (async () => {
+      setCustomerOrdersLoading(true);
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("shop_id", shopId)
+        .eq("customer_email", selectedCustomer.email)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      setCustomerOrdersLoading(false);
+      if (error) {
+        showToast(error.message);
+        return;
+      }
+      setCustomerOrders((data || []).map(row => ({
+        id: row.id,
+        tireName: row.tire_name || row.tire || "Tire order",
+        quantity: Number(row.quantity || 0),
+        total: Number(row.total || 0),
+        status: row.status || "Pending",
+        date: formatOrderCreatedDate(row.created_at),
+      })));
+    })();
+    return () => { cancelled = true; };
+  }, [shopId, selectedCustomer, showToast]);
+
+  const filteredCustomers = customers.filter(c => [c.name, c.phone, c.email].join(" ").toLowerCase().includes(customerSearch.toLowerCase()));
+  const totalSpent = customerOrders.reduce((sum, order) => sum + order.total, 0);
+
+  if (selectedCustomer) {
+    return <div>
+      <button onClick={() => setSelectedCustomer(null)} style={{ background: "none", border: "none", color: COLORS.blue, cursor: "pointer", fontSize: 14, marginBottom: 20 }}>← Back to Customers</button>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("1.6fr 1fr", isMobile), gap: 20 }}>
+        <div style={S.card}>
+          <div style={{ fontWeight: 700, fontSize: 24, marginBottom: 8 }}>{selectedCustomer.name}</div>
+          <div style={{ color: COLORS.gray600, marginBottom: 6 }}>{selectedCustomer.phone}</div>
+          <div style={{ color: COLORS.gray600, marginBottom: 6 }}>{selectedCustomer.email}</div>
+          <div style={{ color: COLORS.gray700, marginTop: 12, fontWeight: 600 }}>Vehicle</div>
+          <div style={{ color: COLORS.gray600, marginTop: 4 }}>{selectedCustomer.vehicle}</div>
+          {selectedCustomer.notes && <div style={{ marginTop: 14 }}><div style={{ fontWeight: 600, color: COLORS.gray700, marginBottom: 6 }}>Notes</div><div style={{ color: COLORS.gray600 }}>{selectedCustomer.notes}</div></div>}
+        </div>
+        <div style={S.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>Order History</div>
+              <div style={{ fontSize: 13, color: COLORS.gray500 }}>{customerOrders.length} order{customerOrders.length === 1 ? "" : "s"}</div>
+            </div>
+          </div>
+          {customerOrdersLoading && <div style={{ padding: "24px 0", textAlign: "center", color: COLORS.gray500 }}>Loading order history…</div>}
+          {!customerOrdersLoading && customerOrders.length === 0 && <div style={{ padding: "24px 0", textAlign: "center", color: COLORS.gray500 }}>No orders found for this customer yet.</div>}
+          {!customerOrdersLoading && customerOrders.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr>{["Tire","Qty","Total","Status","Date"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                <tbody>{customerOrders.map(o => <tr key={o.id}>
+                  <td style={S.td}>{o.tireName}</td>
+                  <td style={S.td}>{o.quantity}</td>
+                  <td style={S.td}>${o.total.toFixed(2)}</td>
+                  <td style={S.td}><span style={S.badge(o.status)}>{o.status}</span></td>
+                  <td style={S.td}>{o.date}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          )}
+          <div style={{ marginTop: 18, paddingTop: 18, borderTop: `1px solid ${COLORS.gray200}`, display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700, color: COLORS.gray900 }}>
+            <div>Total spent</div>
+            <div>${totalSpent.toFixed(2)}</div>
+          </div>
+        </div>
+      </div>
+    </div>;
+  }
+
   return <div>
-    <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Customers</h2>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Customers</h2>
+        <p style={{ color: COLORS.gray500, marginTop: 4 }}>Browse customer records, search by name, email, or phone, and view vehicle history.</p>
+      </div>
+      <input style={{ ...S.input, maxWidth: 320 }} placeholder="Search name, phone, or email" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} />
+    </div>
     {customersLoading && (
       <div style={{ ...S.card, padding: "48px 24px", textAlign: "center", color: COLORS.gray500, fontSize: 15 }}>
         Loading customers…
       </div>
     )}
-    {!customersLoading && (isMobile ? (
+    {!customersLoading && filteredCustomers.length === 0 && (
+      <div style={{ ...S.card, padding: "32px 24px", textAlign: "center", color: COLORS.gray500 }}>No customers match your search.</div>
+    )}
+    {!customersLoading && filteredCustomers.length > 0 && (isMobile ? (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {customers.map(c => (
-          <div key={c.id} style={{ ...S.card, padding: "16px 18px" }}>
+        {filteredCustomers.map(c => (
+          <button key={c.id} onClick={() => setSelectedCustomer(c)} style={{ ...S.card, padding: "16px 18px", textAlign: "left", border: `1px solid ${COLORS.gray200}`, cursor: "pointer" }}>
             <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.gray900 }}>{c.name}</div>
             <div style={{ fontSize: 14, color: COLORS.gray600, marginTop: 6 }}>{c.phone}</div>
             <div style={{ fontSize: 14, color: COLORS.gray600, marginTop: 4 }}>{c.email}</div>
             <div style={{ fontSize: 14, color: COLORS.gray700, marginTop: 6 }}>{c.vehicle}</div>
             <div style={{ fontSize: 13, color: COLORS.gray400, marginTop: 8 }}>Last order: {c.lastOrderDate}</div>
-          </div>
+          </button>
         ))}
       </div>
     ) : (
-    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{["Name","Phone","Email","Vehicle","Last order"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{customers.map(c => <tr key={c.id}>
-          <td style={{ ...S.td, fontWeight: 600 }}>{c.name}</td>
-          <td style={S.td}>{c.phone}</td>
-          <td style={S.td}>{c.email}</td>
-          <td style={S.td}>{c.vehicle}</td>
-          <td style={S.td}>{c.lastOrderDate}</td>
-        </tr>)}</tbody>
-      </table>
-    </div>
+      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Name","Phone","Email","Vehicle","Last order"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>{filteredCustomers.map(c => <tr key={c.id} onClick={() => setSelectedCustomer(c)} style={{ cursor: "pointer" }}>
+            <td style={{ ...S.td, fontWeight: 600 }}>{c.name}</td>
+            <td style={S.td}>{c.phone}</td>
+            <td style={S.td}>{c.email}</td>
+            <td style={S.td}>{c.vehicle}</td>
+            <td style={S.td}>{c.lastOrderDate}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
     ))}
+  </div>;
+}
+
+function PromotionsPage({ shopId, showToast }) {
+  const isMobile = useWindowWidth() < 768;
+  const [promotions, setPromotions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ title: "", discount_type: "percentage", discount_value: "20", applies_to: "All tires", start_date: new Date().toISOString().slice(0, 10), end_date: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString().slice(0, 10), promo_code: "", active: true });
+
+  useEffect(() => {
+    if (!shopId) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("promotions")
+        .select("*")
+        .eq("shop_id", shopId)
+        .order("start_date", { ascending: false });
+      if (cancelled) return;
+      setLoading(false);
+      if (error) {
+        showToast(error.message);
+        return;
+      }
+      setPromotions(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [shopId, showToast]);
+
+  const savePromotion = async () => {
+    if (!form.title.trim() || !form.discount_value || !form.start_date || !form.end_date) {
+      showToast("Please complete the promotion form.");
+      return;
+    }
+    const payload = {
+      shop_id: shopId,
+      title: form.title.trim(),
+      discount_type: form.discount_type,
+      discount_value: Number(form.discount_value),
+      applies_to: form.applies_to,
+      start_date: form.start_date,
+      end_date: form.end_date,
+      promo_code: form.promo_code.trim() || null,
+      active: Boolean(form.active),
+    };
+    const { data, error } = await supabase.from("promotions").insert(payload).select();
+    if (error) {
+      showToast(error.message || "Could not save promotion");
+      return;
+    }
+    setPromotions(p => [...p, ...(data || [])]);
+    setShowForm(false);
+    showToast("Promotion added");
+  };
+
+  const activePromos = promotions.filter(p => p.active && new Date(p.start_date) <= new Date() && new Date(p.end_date) >= new Date());
+  const expiredPromos = promotions.filter(p => !activePromos.includes(p));
+
+  return <div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexDirection: isMobile ? "column" : "row", gap: 12 }}>
+      <div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Promotions</h2>
+        <p style={{ color: COLORS.gray500, marginTop: 4 }}>Create seasonal discounts, promo codes, and campaign offers for your storefront.</p>
+      </div>
+      <button onClick={() => setShowForm(true)} style={S.btn("primary")}>+ Add Promotion</button>
+    </div>
+    {showForm && (
+      <div style={{ ...S.card, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16 }}>
+          <div><label style={S.label}>Promotion Title</label><input style={S.input} value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} /></div>
+          <div><label style={S.label}>Discount Type</label><select style={S.select} value={form.discount_type} onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}><option value="percentage">Percentage off</option><option value="fixed">Fixed amount off</option></select></div>
+          <div><label style={S.label}>Discount Value</label><input style={S.input} value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: e.target.value }))} /></div>
+          <div><label style={S.label}>Applies to</label><select style={S.select} value={form.applies_to} onChange={e => setForm(f => ({ ...f, applies_to: e.target.value }))}><option>All tires</option><option>New tires only</option><option>Used tires only</option></select></div>
+          <div><label style={S.label}>Start Date</label><input type="date" style={S.input} value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} /></div>
+          <div><label style={S.label}>End Date</label><input type="date" style={S.input} value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} /></div>
+          <div style={{ gridColumn: "1/-1" }}><label style={S.label}>Promo Code</label><input style={S.input} value={form.promo_code} onChange={e => setForm(f => ({ ...f, promo_code: e.target.value }))} placeholder="Optional" /></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><input type="checkbox" id="promotionActive" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} /><label htmlFor="promotionActive" style={{ fontSize: 14, color: COLORS.gray700 }}>Active</label></div>
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+          <button onClick={savePromotion} style={S.btn("primary")}>Save Promotion</button>
+          <button onClick={() => setShowForm(false)} style={S.btn("secondary")}>Cancel</button>
+        </div>
+      </div>
+    )}
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 14 }}>Active Promotions</div>
+        {loading && <div style={{ color: COLORS.gray500 }}>Loading promotions…</div>}
+        {!loading && activePromos.length === 0 && <div style={{ color: COLORS.gray500 }}>No active promotions yet.</div>}
+        {!loading && activePromos.map(p => (
+          <div key={p.id} style={{ padding: "12px", borderBottom: `1px solid ${COLORS.gray200}` }}>
+            <div style={{ fontWeight: 700 }}>{p.title}</div>
+            <div style={{ color: COLORS.gray500, fontSize: 13, margin: "4px 0" }}>{p.discount_type === "percentage" ? `${p.discount_value}% off` : `$${p.discount_value} off`} · {p.applies_to}</div>
+            <div style={{ fontSize: 13, color: COLORS.gray500 }}>Valid {p.start_date} through {p.end_date}{p.promo_code ? ` · Code: ${p.promo_code}` : ""}</div>
+          </div>
+        ))}
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 14 }}>Expired Promotions</div>
+        {!loading && expiredPromos.length === 0 && <div style={{ color: COLORS.gray500 }}>No expired promotions.</div>}
+        {!loading && expiredPromos.map(p => (
+          <div key={p.id} style={{ padding: "12px", borderBottom: `1px solid ${COLORS.gray200}` }}>
+            <div style={{ fontWeight: 700 }}>{p.title}</div>
+            <div style={{ color: COLORS.gray500, fontSize: 13, margin: "4px 0" }}>{p.discount_type === "percentage" ? `${p.discount_value}% off` : `$${p.discount_value} off`} · {p.applies_to}</div>
+            <div style={{ fontSize: 13, color: COLORS.gray500 }}>Expired {p.end_date}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   </div>;
 }
 
@@ -2288,6 +2564,7 @@ function Storefront({ nav }) {
   const isMobile = width < 768;
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
   const [publicShopInfo, setPublicShopInfo] = useState({ name: storefront.name, email: "" });
+  const [activePromotion, setActivePromotion] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2306,6 +2583,29 @@ function Storefront({ nav }) {
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!publicShopId) return;
+    let cancelled = false;
+    const today = new Date().toISOString().slice(0, 10);
+    (async () => {
+      const { data, error } = await supabase
+        .from("promotions")
+        .select("*")
+        .eq("shop_id", publicShopId)
+        .eq("active", true)
+        .lte("start_date", today)
+        .gte("end_date", today)
+        .order("start_date", { ascending: false });
+      if (cancelled) return;
+      if (error) {
+        console.warn("Promotion lookup failed:", error.message);
+        return;
+      }
+      setActivePromotion((data || [])[0] || null);
+    })();
+    return () => { cancelled = true; };
+  }, [publicShopId]);
 
   // Handle deposit payment success
   useEffect(() => {
@@ -2619,6 +2919,13 @@ function Storefront({ nav }) {
       <div style={{ background: COLORS.orange, padding: "8px 32px", textAlign: "center", fontSize: 14, color: "#fff", fontWeight: 600 }}>
         🏷️ Free installation on any set of 4 tires — Limited time offer!
       </div>
+      {activePromotion && (
+        <div style={{ padding: "14px 24px", background: "#F8FAFC", borderBottom: `1px solid ${COLORS.gray200}`, color: COLORS.gray900, display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: "center", justifyContent: "center", gap: 12, fontSize: 14 }}>
+          <span style={{ fontWeight: 700 }}>{activePromotion.title}</span>
+          <span>{activePromotion.discount_type === "percentage" ? `${activePromotion.discount_value}% off` : `$${activePromotion.discount_value} off`}</span>
+          {activePromotion.promo_code ? <span style={{ fontWeight: 700 }}>Use code {activePromotion.promo_code} for {activePromotion.discount_type === "percentage" ? `${activePromotion.discount_value}% off` : `$${activePromotion.discount_value} off`}</span> : null}
+        </div>
+      )}
       {/* Hero */}
       <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center" }}>
         <h1 style={{ fontSize: 44, fontWeight: 800, color: "#fff", margin: "0 auto 16px", maxWidth: 700, lineHeight: 1.2 }}>{storefront.hero}</h1>
