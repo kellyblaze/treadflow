@@ -1872,9 +1872,7 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
 function AppointmentsPage({ shopId, showToast }) {
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointments, setAppointments] = useState([]);
-  const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
-  const [currentMonth, setCurrentMonth] = useState(() => new Date());
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [calView, setCalView] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -1897,24 +1895,12 @@ function AppointmentsPage({ shopId, showToast }) {
     return () => { cancelled = true; };
   }, [shopId]);
 
-  const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
-  const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  const monthDays = () => {
-    const start = startOfMonth(currentMonth);
-    const end = endOfMonth(currentMonth);
-    const days = [];
-    for (let i = 1; i <= end.getDate(); i++) days.push(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i));
-    return days;
-  };
-
-  const apptsByDate = appointments.reduce((acc, a) => { acc[a.dateIso] = acc[a.dateIso] || []; acc[a.dateIso].push(a); return acc; }, {});
-
   return <div>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Appointments</h2>
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={() => setViewMode('list')} style={{ ...S.btn(viewMode === 'list' ? 'primary' : 'ghost'), padding: '8px 12px' }}>List</button>
-        <button onClick={() => setViewMode('calendar')} style={{ ...S.btn(viewMode === 'calendar' ? 'primary' : 'ghost'), padding: '8px 12px' }}>Calendar</button>
+        <button onClick={() => setCalView(false)} style={{ ...S.btn(calView ? "secondary" : "primary", "sm") }}>📋 List</button>
+        <button onClick={() => setCalView(true)} style={{ ...S.btn(calView ? "primary" : "secondary", "sm") }}>📅 Calendar</button>
       </div>
     </div>
 
@@ -1924,7 +1910,7 @@ function AppointmentsPage({ shopId, showToast }) {
       </div>
     )}
 
-    {!appointmentsLoading && viewMode === 'list' && (
+    {!appointmentsLoading && !calView && (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {appointments.map(a => <div key={a.id} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 16, alignItems: "center", flex: 1, minWidth: 0 }}>
@@ -1946,41 +1932,33 @@ function AppointmentsPage({ shopId, showToast }) {
       </div>
     )}
 
-    {!appointmentsLoading && viewMode === 'calendar' && (
-      <div style={{ display: 'flex', gap: 16 }}>
-        <div style={{ width: '60%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <button onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} style={S.btn('ghost')}>Previous</button>
-            <div style={{ fontWeight: 700 }}>{currentMonth.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</div>
-            <button onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))} style={S.btn('ghost')}>Next</button>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
-            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d} style={{ textAlign: 'center', fontSize: 12, color: COLORS.gray500 }}>{d}</div>)}
-            {Array(startOfMonth(currentMonth).getDay()).fill(0).map((_,i) => <div key={`b${i}`} />)}
-            {monthDays().map(d => {
-              const iso = d.toISOString().slice(0,10);
-              const count = (apptsByDate[iso] || []).length;
-              return (
-                <div key={iso} onClick={() => setSelectedDate(iso)} style={{ padding: 10, borderRadius: 8, cursor: 'pointer', background: selectedDate === iso ? '#EFF6FF' : '#fff', border: `1px solid ${COLORS.gray200}`, minHeight: 72, position: 'relative' }}>
-                  <div style={{ fontWeight: 700 }}>{d.getDate()}</div>
-                  {count > 0 && <div style={{ position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: '50%', background: COLORS.blue }} />}
-                  {count > 0 && <div style={{ position: 'absolute', left: 8, top: 8, background: COLORS.blue, color: '#fff', borderRadius: 8, padding: '2px 6px', fontSize: 11 }}>{count}</div>}
+    {!appointmentsLoading && calView && (
+      <div style={{ ...S.card }}>
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 8 }}>
+          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: COLORS.gray500 }}>{d}</div>)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+          {(() => {
+            const now = new Date();
+            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            const cells = [];
+            for (let i = 0; i < firstDay; i++) cells.push(<div key={"e"+i} />);
+            for (let d = 1; d <= daysInMonth; d++) {
+              const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+              const dayAppts = appointments.filter(a => a.dateIso === dateStr);
+              cells.push(
+                <div key={d} style={{ textAlign: "center", padding: "6px 2px", borderRadius: 6, background: dayAppts.length > 0 ? "#EFF6FF" : "transparent", border: dayAppts.length > 0 ? "1px solid #BFDBFE" : "1px solid transparent" }}>
+                  <div style={{ fontSize: 13, fontWeight: dayAppts.length > 0 ? 700 : 400, color: dayAppts.length > 0 ? COLORS.blue : COLORS.gray700 }}>{d}</div>
+                  {dayAppts.length > 0 && <div style={{ fontSize: 10, color: COLORS.blue, fontWeight: 600 }}>{dayAppts.length} appt{dayAppts.length > 1 ? "s" : ""}</div>}
                 </div>
               );
-            })}
-          </div>
-        </div>
-        <div style={{ width: '40%' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>{selectedDate ? `Appointments for ${selectedDate}` : 'Select a day'}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(apptsByDate[selectedDate] || []).map(a => (
-              <div key={a.id} style={{ ...S.card }}>
-                <div style={{ fontWeight: 700 }}>{a.customerName}</div>
-                <div style={{ fontSize: 13, color: COLORS.gray500 }}>{a.time || 'All day'} · {a.vehicle}</div>
-                <div style={{ marginTop: 6 }}><span style={S.badge(a.status)}>{a.status}</span></div>
-              </div>
-            ))}
-          </div>
+            }
+            return cells;
+          })()}
         </div>
       </div>
     )}
