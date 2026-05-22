@@ -2684,6 +2684,7 @@ function StaffPage({ showToast }) {
 }
 
 function ShopSettings({ shopId, showToast }) {
+  console.log('ShopSettings shopId prop:', shopId);
   const isMobile = useWindowWidth() < 768;
   const [mobileServiceEnabled, setMobileServiceEnabled] = useState(false);
   const [mobileServiceRadius, setMobileServiceRadius] = useState(25);
@@ -2717,6 +2718,7 @@ function ShopSettings({ shopId, showToast }) {
   }, [shopId, showToast]);
 
   const saveMobileSettings = async () => {
+    console.log('saving mobile settings, shopId:', shopId, 'enabled:', mobileServiceEnabled);
     if (!shopId) return;
     setSavingMobileService(true);
     const { error } = await supabase
