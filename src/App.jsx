@@ -1081,7 +1081,7 @@ function ShopDashboard({ nav }) {
   const shopLocationLine = shopRecord ? [shopRecord.city, shopRecord.state].filter(Boolean).join(", ") : "";
 
   const sidebar = [
-    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
+    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
   ];
 
   const handleLogout = async () => {
@@ -1162,6 +1162,7 @@ function ShopDashboard({ nav }) {
         {section === "orders" && <OrdersPage shopId={shopId} shopName={shopRecord.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
+        {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
         {section === "staff" && <StaffPage showToast={showToast} />}
         {section === "settings" && <ShopSettings showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
