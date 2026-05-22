@@ -2730,6 +2730,38 @@ function Storefront({ nav }) {
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
   const [publicShopInfo, setPublicShopInfo] = useState({ name: storefront.name, email: "" });
   const [activePromotion, setActivePromotion] = useState(null);
+  const [searchMode, setSearchMode] = useState("size");
+  const [vehicleYear, setVehicleYear] = useState("2024");
+  const [vehicleMake, setVehicleMake] = useState("Toyota");
+  const [vehicleModel, setVehicleModel] = useState("Camry");
+  const vehicleYears = ["2026", "2025", "2024", "2023", "2022", "2021"];
+  const vehicleMakes = ["Toyota", "Honda", "Ford", "Chevrolet", "Nissan"];
+  const vehicleModelsByMake = {
+    Toyota: ["Camry", "Corolla", "RAV4"],
+    Honda: ["Civic", "Accord", "CR-V"],
+    Ford: ["F-150", "Escape", "Mustang"],
+    Chevrolet: ["Silverado", "Equinox", "Malibu"],
+    Nissan: ["Altima", "Rogue", "Sentra"],
+  };
+  const vehicleModelOptions = vehicleModelsByMake[vehicleMake] || [];
+  const vehicleSizeMap = {
+    "Toyota|Camry": ["225/55R17", "205/65R16"],
+    "Toyota|Corolla": ["205/55R16", "195/65R15"],
+    "Toyota|RAV4": ["225/65R17", "235/55R19"],
+    "Honda|Civic": ["215/55R16", "205/55R16"],
+    "Honda|Accord": ["235/45R18", "225/50R17"],
+    "Honda|CR-V": ["225/65R17", "235/60R18"],
+    "Ford|F-150": ["275/65R18", "265/70R17"],
+    "Ford|Escape": ["235/60R18", "235/55R19"],
+    "Ford|Mustang": ["235/55R18", "255/40R19"],
+    "Chevrolet|Silverado": ["275/65R18", "265/70R17"],
+    "Chevrolet|Equinox": ["225/65R17", "235/55R19"],
+    "Chevrolet|Malibu": ["225/55R17", "215/55R17"],
+    "Nissan|Altima": ["215/55R17", "225/45R18"],
+    "Nissan|Rogue": ["225/65R17", "235/55R19"],
+    "Nissan|Sentra": ["205/55R16", "215/45R18"],
+  };
+  const vehicleSearchSizes = vehicleSizeMap[`${vehicleMake}|${vehicleModel}`] || [];
 
   useEffect(() => {
     let cancelled = false;
@@ -2825,7 +2857,13 @@ function Storefront({ nav }) {
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([{ from: "bot", text: "Hi! Welcome to Greenville Tire Pros. Ask me anything about our inventory, services, or hours." }]);
 
-  const filtered = mockTires.filter(t => t.status === "Active" && (condFilter === "All" || t.condition === condFilter) && (t.brand + t.model + t.size).toLowerCase().includes(search.toLowerCase()));
+  const filtered = mockTires.filter(t => {
+    if (t.status !== "Active" || (condFilter !== "All" && t.condition !== condFilter)) return false;
+    if (searchMode === "vehicle") {
+      return vehicleSearchSizes.includes(t.size);
+    }
+    return (t.brand + t.model + t.size).toLowerCase().includes(search.toLowerCase());
+  });
 
   const sendChat = () => {
     if (!chatInput.trim()) return;
@@ -3095,9 +3133,29 @@ function Storefront({ nav }) {
       <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center" }}>
         <h1 style={{ fontSize: 44, fontWeight: 800, color: "#fff", margin: "0 auto 16px", maxWidth: 700, lineHeight: 1.2 }}>{storefront.hero}</h1>
         <p style={{ fontSize: 18, color: "rgba(255,255,255,0.65)", maxWidth: 540, margin: "0 auto 32px", lineHeight: 1.6 }}>{storefront.heroSub}</p>
+        <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: isMobile ? "wrap" : "nowrap", marginBottom: 16 }}>
+          {[["size","Search by Size"], ["vehicle","Search by Vehicle"]].map(([mode, label]) => (
+            <button key={mode} onClick={() => setSearchMode(mode)} style={{ padding: "10px 18px", borderRadius: 999, border: searchMode === mode ? `1px solid ${COLORS.white}` : `1px solid rgba(255,255,255,0.5)`, background: searchMode === mode ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff", cursor: "pointer", fontWeight: 700, minWidth: 150 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {searchMode === "vehicle" && (
+          <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, minmax(140px, 1fr))", isMobile), gap: 12, justifyContent: "center", maxWidth: 780, margin: "0 auto 18px", width: isMobile ? "100%" : undefined }}>
+            <select value={vehicleYear} onChange={e => setVehicleYear(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+              {vehicleYears.map(year => <option key={year} value={year}>{year}</option>)}
+            </select>
+            <select value={vehicleMake} onChange={e => { const make = e.target.value; setVehicleMake(make); const nextModels = vehicleModelsByMake[make] || []; setVehicleModel(nextModels[0] || ""); }} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+              {vehicleMakes.map(make => <option key={make} value={make}>{make}</option>)}
+            </select>
+            <select value={vehicleModel} onChange={e => setVehicleModel(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+              {vehicleModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
+            </select>
+          </div>
+        )}
         <div style={{ display: "flex", gap: 12, justifyContent: "center", maxWidth: 520, margin: "0 auto", background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, flexDirection: isMobile ? "column" : "row", width: isMobile ? "100%" : undefined, boxSizing: "border-box" }}>
-          <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: "#fff", boxSizing: "border-box" }} placeholder="Search by size, brand, or model (e.g. 225/55R17)..." value={search} onChange={e => setSearch(e.target.value)} />
-          <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap", ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>Search Tires</button>
+          <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: "#fff", boxSizing: "border-box" }} placeholder={searchMode === "vehicle" ? `Search tires for ${vehicleYear} ${vehicleMake} ${vehicleModel}` : "Search by size, brand, or model (e.g. 225/55R17)..."} value={search} onChange={e => setSearch(e.target.value)} />
+          <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap", ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>{searchMode === "vehicle" ? "Search by Vehicle" : "Search Tires"}</button>
         </div>
         <div style={{ display: "flex", gap: 20, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
           {[["📍","1420 Wade Hampton Blvd, Greenville SC"],["🕐","Mon–Fri 8am–6pm · Sat 8am–4pm"],["⭐","4.9/5 — 127 reviews"]].map(([icon, text]) => <span key={text} style={{ color: "rgba(255,255,255,0.6)", fontSize: 14 }}>{icon} {text}</span>)}
