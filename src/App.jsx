@@ -1083,7 +1083,6 @@ function ShopDashboard({ nav }) {
         .eq("user_id", user.id)
         .order("name", { ascending: true });
       if (cancelled) return;
-      console.log('shops loaded:', data, 'error:', error);
       if (error) {
         console.warn("Shop lookup failed:", error);
 
@@ -1170,8 +1169,8 @@ function ShopDashboard({ nav }) {
         {shops.length > 1 && (
           <div style={{ marginBottom: 18 }}>
             <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.9)", marginBottom: 8, fontWeight: 600 }}>Switch shop</label>
-            <select value={activeShop?.id || ""} onChange={e => setActiveShop(shops.find(s => s.id === e.target.value) || activeShop)} style={{ width: "100%", appearance: "none", borderRadius: 12, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", padding: "10px 12px", fontSize: 13, cursor: "pointer" }}>
-              {shops.map(shop => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+            <select value={activeShop?.id || ""} onChange={e => setActiveShop(shops.find(s => s.id === e.target.value) || activeShop)} style={{ width: "100%", appearance: "none", borderRadius: 12, border: "1px solid rgba(255,255,255,0.3)", background: "#1E3A5F", color: "#fff", padding: "10px 12px", fontSize: 13, cursor: "pointer" }}>
+              {shops.map(shop => <option key={shop.id} value={shop.id} style={{ background: "#0A1628", color: "#fff" }}>{shop.name}</option>)}
             </select>
           </div>
         )}
