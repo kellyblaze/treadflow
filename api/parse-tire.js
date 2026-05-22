@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     if (!anthropicRes.ok) {
       const errBody = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errBody);
-      return res.status(502).json({ error: "Failed to parse tire details" });
+      return res.status(502).json({ error: "Failed to parse tire details", details: errBody, status: anthropicRes.status });
     }
 
     const data = await anthropicRes.json();

@@ -1,0 +1,14 @@
+# Query: CSV Upload
+# ContextLines: 1
+
+4 results - 2 files
+
+App.jsx:
+  794        <div style={{ display: "flex", gap: 10 }}>
+  795:         <button onClick={() => showToast("CSV upload opened")} style={S.btn("secondary")}>📤 CSV Upload</button>
+  796          <button onClick={() => setShowAdd(true)} style={S.btn("primary")}>+ Add Tire</button>
+
+src\App.jsx:
+  1541        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+  1542:         <button type="button" onClick={() => showToast("CSV upload dialog opened")} style={S.btn("secondary")}>📤 CSV Upload</button>
+  1543          <button type="button" onClick={openVoiceModal} style={S.btn("secondary")}>🎤 Voice Add</button>
