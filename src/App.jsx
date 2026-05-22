@@ -172,6 +172,7 @@ function customerFromSupabaseRow(row) {
     lastOrderDate: formatCustomerRecordDate(row.created_at),
   };
 }
+const MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 function parseAppointmentDateParts(dateVal) {
   const s = dateVal == null ? "" : String(dateVal).slice(0, 10);
