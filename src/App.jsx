@@ -2093,6 +2093,7 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [hoveredDate, setHoveredDate] = useState(null);
 
   const loadAllJobs = useCallback(async () => {
     if (!shopId) return;
@@ -2197,21 +2198,45 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
           if (!cell) return <div key={`empty-${idx}`} />;
           const isToday = cell.dateStr === today;
           const isSelected = cell.dateStr === selectedDate;
+          const hasJobs = cell.jobCount > 0;
+          const isHovered = hoveredDate === cell.dateStr;
+
+          let bgColor = "#fff";
+          let textColor = COLORS.gray900;
+          let borderStyle = `1px solid ${COLORS.gray200}`;
+
+          if (isSelected) {
+            bgColor = COLORS.navy;
+            textColor = "#fff";
+            borderStyle = `2px solid ${COLORS.navy}`;
+          } else if (hasJobs) {
+            bgColor = COLORS.blue;
+            textColor = "#fff";
+            borderStyle = isToday ? `2px solid ${COLORS.orange}` : `1px solid ${COLORS.blue}`;
+          } else if (isToday) {
+            borderStyle = `2px solid ${COLORS.orange}`;
+          }
+
+          const hoverBg = isHovered ? (bgColor === "#fff" ? COLORS.gray100 : bgColor) : bgColor;
+
           return (
             <button
               key={cell.dateStr}
               onClick={() => setSelectedDate(cell.dateStr)}
+              onMouseEnter={() => setHoveredDate(cell.dateStr)}
+              onMouseLeave={() => setHoveredDate(null)}
               style={{
                 position: "relative",
                 padding: isMobile ? 6 : 10,
                 borderRadius: 8,
-                border: isToday ? `2px solid ${COLORS.orange}` : isSelected ? `2px solid ${COLORS.navy}` : `1px solid ${COLORS.gray200}`,
-                background: isSelected ? COLORS.navy : "#fff",
-                color: isSelected ? "#fff" : COLORS.gray900,
+                border: borderStyle,
+                background: hoverBg,
+                color: textColor,
                 fontSize: isMobile ? 12 : 14,
                 fontWeight: isSelected ? 700 : 500,
                 cursor: "pointer",
                 transition: "all 0.2s",
+                opacity: isHovered && bgColor !== "#fff" ? 0.85 : 1,
               }}
             >
               <div>{cell.day}</div>
@@ -2220,7 +2245,7 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
                   position: "absolute",
                   top: isMobile ? 2 : 4,
                   right: isMobile ? 2 : 4,
-                  background: COLORS.blue,
+                  background: COLORS.orange,
                   color: "#fff",
                   borderRadius: "50%",
                   width: isMobile ? 16 : 20,
