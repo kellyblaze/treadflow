@@ -2089,11 +2089,12 @@ function AppointmentsPage({ shopId, showToast }) {
 function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
   const isMobile = useWindowWidth() < 768;
   const [loading, setLoading] = useState(true);
-  const [jobs, setJobs] = useState([]);
+  const [allJobs, setAllJobs] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [currentMonth, setCurrentMonth] = useState(new Date());
   const [statusUpdating, setStatusUpdating] = useState(false);
 
-  const loadJobs = useCallback(async () => {
+  const loadAllJobs = useCallback(async () => {
     if (!shopId) return;
     setLoading(true);
     const { data, error } = await supabase
@@ -2101,14 +2102,13 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
       .select("id, customer_name, customer_phone, service_address, mobile_time_slot, mobile_date, quantity, total, status, created_at")
       .eq("shop_id", shopId)
       .eq("is_mobile", true)
-      .eq("mobile_date", selectedDate)
-      .order("mobile_time_slot", { ascending: true });
+      .order("mobile_date", { ascending: true });
     setLoading(false);
     if (error) {
       showToast(error.message || "Unable to load mobile jobs.");
       return;
     }
-    setJobs((data || []).map(row => ({
+    setAllJobs((data || []).map(row => ({
       id: row.id,
       customerName: row.customer_name,
       customerPhone: row.customer_phone,
@@ -2119,20 +2119,19 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
       total: Number(row.total || 0),
       status: row.status || "Pending",
     })));
-  }, [shopId, selectedDate, showToast]);
+  }, [shopId, showToast]);
 
   useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
+    loadAllJobs();
+  }, [loadAllJobs]);
 
-  const slotCounts = jobs.reduce((acc, job) => {
+  const selectedDayJobs = allJobs.filter(job => job.mobileDate === selectedDate).sort((a, b) => String(a.mobileTimeSlot).localeCompare(b.mobileTimeSlot));
+  const slotCounts = selectedDayJobs.reduce((acc, job) => {
     if (!job.mobileTimeSlot) return acc;
     acc[job.mobileTimeSlot] = (acc[job.mobileTimeSlot] || 0) + 1;
     return acc;
   }, {});
-
-  const totalRevenue = jobs.reduce((sum, job) => sum + job.total, 0);
-  const sortedJobs = [...jobs].sort((a, b) => String(a.mobileTimeSlot).localeCompare(b.mobileTimeSlot));
+  const totalRevenue = selectedDayJobs.reduce((sum, job) => sum + job.total, 0);
 
   const updateStatus = async (jobId, newStatus, job) => {
     if (!jobId) return;
@@ -2143,7 +2142,7 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
       showToast(error.message || "Unable to update job status.");
       return;
     }
-    setJobs(current => current.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
+    setAllJobs(current => current.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
     if (newStatus === "En Route") {
       await sendSms(job.customerPhone, `Your TreadFlow mobile tire tech is on the way! Expected arrival: ${job.mobileTimeSlot}. Call us at ${shopPhone} with any questions.`);
     }
@@ -2152,57 +2151,154 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
     }
   };
 
+  const today = new Date().toISOString().slice(0, 10);
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const jobsByDate = allJobs.reduce((acc, job) => {
+    if (!acc[job.mobileDate]) acc[job.mobileDate] = [];
+    acc[job.mobileDate].push(job);
+    return acc;
+  }, {});
+
+  const monthStr = currentMonth.toLocaleString("default", { month: "long", year: "numeric" });
+
+  const calendarCells = [];
+  for (let i = 0; i < firstDay; i++) calendarCells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const dayJobs = jobsByDate[dateStr] || [];
+    calendarCells.push({ day: d, dateStr, jobCount: dayJobs.length });
+  }
+
   return <div>
-    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "center", gap: 14, marginBottom: 20 }}>
-      <div>
-        <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Mobile Jobs</h2>
-        <p style={{ color: COLORS.gray500, marginTop: 4 }}>View and manage mobile tire service jobs for {shopName}.</p>
+    <div>
+      <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Mobile Jobs</h2>
+      <p style={{ color: COLORS.gray500, marginBottom: 20 }}>View and manage mobile tire service jobs for {shopName}.</p>
+    </div>
+
+    <div style={{ ...S.card, marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} style={{ ...S.btn("secondary", "sm") }}>← Previous</button>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{monthStr}</div>
+        <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} style={{ ...S.btn("secondary", "sm") }}>Next →</button>
       </div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ fontSize: 14, color: COLORS.gray700, marginBottom: 0 }}>Date</label>
-        <input type="date" style={S.input} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: isMobile ? 2 : 4, marginBottom: 12 }}>
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
+          <div key={d} style={{ textAlign: "center", fontSize: isMobile ? 10 : 12, fontWeight: 700, color: COLORS.gray500, paddingBottom: 8 }}>{d}</div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: isMobile ? 2 : 4 }}>
+        {calendarCells.map((cell, idx) => {
+          if (!cell) return <div key={`empty-${idx}`} />;
+          const isToday = cell.dateStr === today;
+          const isSelected = cell.dateStr === selectedDate;
+          return (
+            <button
+              key={cell.dateStr}
+              onClick={() => setSelectedDate(cell.dateStr)}
+              style={{
+                position: "relative",
+                padding: isMobile ? 6 : 10,
+                borderRadius: 8,
+                border: isToday ? `2px solid ${COLORS.orange}` : isSelected ? `2px solid ${COLORS.navy}` : `1px solid ${COLORS.gray200}`,
+                background: isSelected ? COLORS.navy : "#fff",
+                color: isSelected ? "#fff" : COLORS.gray900,
+                fontSize: isMobile ? 12 : 14,
+                fontWeight: isSelected ? 700 : 500,
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              <div>{cell.day}</div>
+              {cell.jobCount > 0 && (
+                <div style={{
+                  position: "absolute",
+                  top: isMobile ? 2 : 4,
+                  right: isMobile ? 2 : 4,
+                  background: COLORS.blue,
+                  color: "#fff",
+                  borderRadius: "50%",
+                  width: isMobile ? 16 : 20,
+                  height: isMobile ? 16 : 20,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: isMobile ? 9 : 11,
+                  fontWeight: 700,
+                }}>
+                  {cell.jobCount}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 14, marginBottom: 18 }}>
+
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr 1fr", isMobile), gap: 12, marginBottom: 18 }}>
       <div style={S.card}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 8 }}>Total Mobile Jobs</div>
-        <div style={{ fontSize: 28, fontWeight: 800 }}>{jobs.length}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 6 }}>Selected Day</div>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{new Date(selectedDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
       </div>
       <div style={S.card}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 8 }}>Mobile Revenue</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 6 }}>Total Jobs</div>
+        <div style={{ fontSize: 28, fontWeight: 800 }}>{selectedDayJobs.length}</div>
+      </div>
+      <div style={S.card}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 6 }}>Revenue</div>
         <div style={{ fontSize: 28, fontWeight: 800 }}>${totalRevenue.toFixed(2)}</div>
       </div>
     </div>
+
     {loading ? (
       <div style={{ ...S.card, padding: 24, textAlign: "center", color: COLORS.gray500 }}>Loading mobile jobs…</div>
-    ) : sortedJobs.length === 0 ? (
-      <div style={{ ...S.card, padding: 24, textAlign: "center", color: COLORS.gray500 }}>No mobile jobs scheduled for this date.</div>
+    ) : selectedDayJobs.length === 0 ? (
+      <div style={{ ...S.card, padding: 24, textAlign: "center", color: COLORS.gray500 }}>No mobile jobs scheduled for {new Date(selectedDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.</div>
     ) : (
       <div style={{ display: "grid", gap: 14 }}>
-        {sortedJobs.map(job => {
+        {selectedDayJobs.map(job => {
           const conflict = slotCounts[job.mobileTimeSlot] > 1;
+          const timeSlotParts = (job.mobileTimeSlot || "").split(" - ");
+          const startTime = timeSlotParts[0] || "";
           return (
             <div key={job.id} style={{ ...S.card, borderColor: conflict ? COLORS.red : COLORS.gray200, borderWidth: 1, borderStyle: "solid" }}>
-              <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 260px", isMobile), gap: 14, alignItems: "flex-start" }}>
+              <div style={{ display: "grid", gridTemplateColumns: gridCols("90px 1fr 1fr", isMobile), gap: 14, alignItems: "flex-start" }}>
+                <div style={{ background: COLORS.blue, color: "#fff", borderRadius: 8, padding: "8px 10px", textAlign: "center", flexShrink: 0 }}>
+                  <div style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600 }}>Time</div>
+                  <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, marginTop: 2, wordBreak: "break-word" }}>{startTime}</div>
+                </div>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{job.customerName}</div>
-                  <div style={{ display: "grid", gap: 4, color: COLORS.gray600, fontSize: 13 }}>
-                    <div>{job.customerPhone}</div>
-                    <div>{job.serviceAddress}</div>
-                    <div>{job.mobileTimeSlot} · {job.mobileDate}</div>
-                    <div>{job.quantity} tire{job.quantity === 1 ? "" : "s"}</div>
+                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{job.customerName}</div>
+                  <div style={{ display: "grid", gap: 3, color: COLORS.gray600, fontSize: 13 }}>
+                    <div>📞 {job.customerPhone}</div>
+                    <div>📍 {job.serviceAddress}</div>
+                    <div>🛞 {job.quantity} tire{job.quantity === 1 ? "" : "s"} · ${job.total.toFixed(2)}</div>
                   </div>
                 </div>
                 <div style={{ textAlign: isMobile ? "left" : "right" }}>
                   <div style={S.badge(job.status)}>{job.status}</div>
-                  {conflict && <div style={{ marginTop: 8, color: COLORS.red, fontSize: 13, fontWeight: 600 }}>Time conflict</div>}
+                  {conflict && <div style={{ marginTop: 6, color: COLORS.red, fontSize: 12, fontWeight: 600 }}>⚠️ Time conflict</div>}
                 </div>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end", gap: 10, marginTop: 16 }}>
-                {job.status !== "Confirmed" && job.status !== "Completed" && job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "Confirmed", job)} style={S.btn("primary", "sm")}>Confirm</button>}
-                {job.status !== "En Route" && job.status !== "Completed" && job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "En Route", job)} style={S.btn("secondary", "sm")}>En Route</button>}
-                {job.status !== "Completed" && job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "Completed", job)} style={S.btn("primary", "sm")}>Completed</button>}
-                {job.status !== "Cancelled" && <button type="button" onClick={() => updateStatus(job.id, "Cancelled", job)} style={S.btn("danger", "sm")}>Cancel</button>}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+                {job.status !== "Confirmed" && job.status !== "Completed" && job.status !== "Cancelled" && (
+                  <button type="button" onClick={() => updateStatus(job.id, "Confirmed", job)} style={S.btn("primary", "sm")}>Confirm</button>
+                )}
+                {job.status !== "En Route" && job.status !== "Completed" && job.status !== "Cancelled" && (
+                  <button type="button" onClick={() => updateStatus(job.id, "En Route", job)} style={S.btn("secondary", "sm")}>En Route</button>
+                )}
+                {job.status !== "Completed" && job.status !== "Cancelled" && (
+                  <button type="button" onClick={() => updateStatus(job.id, "Completed", job)} style={S.btn("primary", "sm")}>Completed</button>
+                )}
+                {job.status !== "Cancelled" && (
+                  <button type="button" onClick={() => updateStatus(job.id, "Cancelled", job)} style={S.btn("danger", "sm")}>Cancel</button>
+                )}
+                <a href={`https://maps.google.com/?q=${encodeURIComponent(job.serviceAddress)}`} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("ghost", "sm"), color: COLORS.blue, border: `1px solid ${COLORS.blue}` }}>📍 Map</a>
               </div>
             </div>
           );
