@@ -2813,6 +2813,8 @@ function ShopSettings({ shopId, showToast }) {
   const [mobileServiceHoursStart, setMobileServiceHoursStart] = useState("8:00 AM");
   const [mobileServiceHoursEnd, setMobileServiceHoursEnd] = useState("6:00 PM");
   const [savingMobileService, setSavingMobileService] = useState(false);
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [savingGallery, setSavingGallery] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -2820,12 +2822,12 @@ function ShopSettings({ shopId, showToast }) {
     (async () => {
       const { data, error } = await supabase
         .from("shops")
-        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, gallery_images")
         .eq("id", shopId)
         .maybeSingle();
       if (cancelled) return;
       if (error) {
-        showToast(error.message || "Unable to load mobile service settings.");
+        showToast(error.message || "Unable to load settings.");
         return;
       }
       if (!data) return;
@@ -2834,6 +2836,7 @@ function ShopSettings({ shopId, showToast }) {
       setMobileServiceFee(data.mobile_service_fee ?? 50);
       setMobileServiceHoursStart(data.mobile_service_hours_start || "8:00 AM");
       setMobileServiceHoursEnd(data.mobile_service_hours_end || "6:00 PM");
+      setGalleryImages(Array.isArray(data.gallery_images) ? data.gallery_images : []);
     })();
     return () => { cancelled = true; };
   }, [shopId, showToast]);
@@ -2858,6 +2861,21 @@ function ShopSettings({ shopId, showToast }) {
       return;
     }
     showToast("Mobile service settings saved.");
+  };
+
+  const saveGalleryImages = async () => {
+    if (!shopId) return;
+    setSavingGallery(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({ gallery_images: galleryImages })
+      .eq("id", shopId);
+    setSavingGallery(false);
+    if (error) {
+      showToast(error.message || "Unable to save gallery images.");
+      return;
+    }
+    showToast("Gallery images saved.");
   };
 
   return <div>
@@ -2917,6 +2935,25 @@ function ShopSettings({ shopId, showToast }) {
           <span style={{ fontSize: 14, color: COLORS.gray700, width: 120 }}>{d}</span>
           <input style={{ ...S.input, flex: 1, maxWidth: 200 }} defaultValue={i === 0 ? "8:00 AM – 6:00 PM" : i === 1 ? "8:00 AM – 4:00 PM" : "Closed"} />
         </div>)}
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Photo Gallery</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 12 }}>Paste up to 6 image URLs (one per line). These will display on your storefront in the "Our Work" section.</div>
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <div key={i} style={{ marginBottom: 8 }}>
+            <input
+              style={{ ...S.input, width: "100%" }}
+              placeholder={`Image URL ${i + 1}`}
+              value={galleryImages[i] || ""}
+              onChange={e => {
+                const newImages = [...galleryImages];
+                newImages[i] = e.target.value;
+                setGalleryImages(newImages.filter(img => img.trim()));
+              }}
+            />
+          </div>
+        ))}
+        <button onClick={saveGalleryImages} disabled={savingGallery} style={S.btn("primary")}>{savingGallery ? "Saving…" : "Save Gallery Images"}</button>
       </div>
     </div>
   </div>;
@@ -3086,6 +3123,7 @@ function buildMobileTimeSlots(startTime, endTime) {
 // alter table shops add column if not exists mobile_service_fee numeric default 50;
 // alter table shops add column if not exists mobile_service_hours_start text default '8:00 AM';
 // alter table shops add column if not exists mobile_service_hours_end text default '6:00 PM';
+// alter table shops add column if not exists gallery_images text[] default array[]::text[];
 
 async function storefrontSubmitReservation(shopId, {
   orderTire,
@@ -3338,10 +3376,33 @@ function Storefront({ nav }) {
     })();
     return () => { cancelled = true; };
   }, [publicShopId, resService, resDate]);
+
+  useEffect(() => {
+    if (!publicShopId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from("shops").select("gallery_images").eq("id", publicShopId).maybeSingle();
+      if (cancelled) return;
+      const imgs = data?.gallery_images || [];
+      if (Array.isArray(imgs) && imgs.length > 0) {
+        setGalleryImages(imgs);
+      } else {
+        setGalleryImages([1, 2, 3, 4, 5, 6].map(i => `https://picsum.photos/400/300?random=${i}`));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [publicShopId]);
   const [savedOrderId, setSavedOrderId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([{ from: "bot", text: "Hi! Welcome to Greenville Tire Pros. Ask me anything about our inventory, services, or hours." }]);
+  const [showTireSizeFinder, setShowTireSizeFinder] = useState(false);
+  const [tireWidth, setTireWidth] = useState("");
+  const [tireAspectRatio, setTireAspectRatio] = useState("");
+  const [tireRimSize, setTireRimSize] = useState("");
+  const [showLightbox, setShowLightbox] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [galleryImages, setGalleryImages] = useState([]);
 
   const filtered = mockTires.filter(t => {
     if (t.status !== "Active" || (condFilter !== "All" && t.condition !== condFilter)) return false;
@@ -3663,43 +3724,103 @@ function Storefront({ nav }) {
           {activePromotion.promo_code ? <span style={{ fontWeight: 700 }}>Use code {activePromotion.promo_code} for {activePromotion.discount_type === "percentage" ? `${activePromotion.discount_value}% off` : `$${activePromotion.discount_value} off`}</span> : null}
         </div>
       )}
-      {/* Hero */}
-      <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center" }}>
-        <h1 style={{ fontSize: 44, fontWeight: 800, color: "#fff", margin: "0 auto 16px", maxWidth: 700, lineHeight: 1.2 }}>{storefront.hero}</h1>
-        <p style={{ fontSize: 18, color: "rgba(255,255,255,0.65)", maxWidth: 540, margin: "0 auto 32px", lineHeight: 1.6 }}>{storefront.heroSub}</p>
-        <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: isMobile ? "wrap" : "nowrap", marginBottom: 16 }}>
-          {[["size","Search by Size"], ["vehicle","Search by Vehicle"]].map(([mode, label]) => (
-            <button key={mode} onClick={() => setSearchMode(mode)} style={{ padding: "10px 18px", borderRadius: 999, border: searchMode === mode ? `1px solid ${COLORS.white}` : `1px solid rgba(255,255,255,0.5)`, background: searchMode === mode ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff", cursor: "pointer", fontWeight: 700, minWidth: 150 }}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {searchMode === "vehicle" && (
-          <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, minmax(140px, 1fr))", isMobile), gap: 12, justifyContent: "center", maxWidth: 780, margin: "0 auto 18px", width: isMobile ? "100%" : undefined }}>
-            <select value={vehicleYear} onChange={e => setVehicleYear(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
-              {vehicleYears.map(year => <option key={year} value={year}>{year}</option>)}
-            </select>
-            <select value={vehicleMake} onChange={e => { const make = e.target.value; setVehicleMake(make); const nextModels = vehicleModelsByMake[make] || []; setVehicleModel(nextModels[0] || ""); }} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
-              {vehicleMakes.map(make => <option key={make} value={make}>{make}</option>)}
-            </select>
-            <select value={vehicleModel} onChange={e => setVehicleModel(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
-              {vehicleModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
-            </select>
+      {/* Hero with Video Background */}
+      <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+        <video autoPlay loop muted playsInline style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.3 }}>
+          <source src="https://videos.pexels.com/video-files/4065675/4065675-uhd_2560_1440_24fps.mp4" type="video/mp4" />
+        </video>
+        <div style={{ position: "absolute", inset: 0, background: "rgba(10,22,40,0.7)" }} />
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <h1 style={{ fontSize: 44, fontWeight: 800, color: "#fff", margin: "0 auto 16px", maxWidth: 700, lineHeight: 1.2 }}>{storefront.hero}</h1>
+          <p style={{ fontSize: 18, color: "rgba(255,255,255,0.65)", maxWidth: 540, margin: "0 auto 32px", lineHeight: 1.6 }}>{storefront.heroSub}</p>
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: isMobile ? "wrap" : "nowrap", marginBottom: 16 }}>
+            {[["size","Search by Size"], ["vehicle","Search by Vehicle"]].map(([mode, label]) => (
+              <button key={mode} onClick={() => setSearchMode(mode)} style={{ padding: "10px 18px", borderRadius: 999, border: searchMode === mode ? `1px solid ${COLORS.white}` : `1px solid rgba(255,255,255,0.5)`, background: searchMode === mode ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff", cursor: "pointer", fontWeight: 700, minWidth: 150 }}>
+                {label}
+              </button>
+            ))}
           </div>
-        )}
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", maxWidth: 520, margin: "0 auto", background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, flexDirection: isMobile ? "column" : "row", width: isMobile ? "100%" : undefined, boxSizing: "border-box" }}>
-          <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: "#fff", boxSizing: "border-box" }} placeholder={searchMode === "vehicle" ? `Search tires for ${vehicleYear} ${vehicleMake} ${vehicleModel}` : "Search by size, brand, or model (e.g. 225/55R17)..."} value={search} onChange={e => setSearch(e.target.value)} />
-          <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap", ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>{searchMode === "vehicle" ? "Search by Vehicle" : "Search Tires"}</button>
-        </div>
-        <div style={{ display: "flex", gap: 20, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
-          {[["📍","1420 Wade Hampton Blvd, Greenville SC"],["🕐","Mon–Fri 8am–6pm · Sat 8am–4pm"],["⭐","4.9/5 — 127 reviews"]].map(([icon, text]) => <span key={text} style={{ color: "rgba(255,255,255,0.6)", fontSize: 14 }}>{icon} {text}</span>)}
+          {searchMode === "vehicle" && (
+            <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, minmax(140px, 1fr))", isMobile), gap: 12, justifyContent: "center", maxWidth: 780, margin: "0 auto 18px", width: isMobile ? "100%" : undefined }}>
+              <select value={vehicleYear} onChange={e => setVehicleYear(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+                {vehicleYears.map(year => <option key={year} value={year}>{year}</option>)}
+              </select>
+              <select value={vehicleMake} onChange={e => { const make = e.target.value; setVehicleMake(make); const nextModels = vehicleModelsByMake[make] || []; setVehicleModel(nextModels[0] || ""); }} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+                {vehicleMakes.map(make => <option key={make} value={make}>{make}</option>)}
+              </select>
+              <select value={vehicleModel} onChange={e => setVehicleModel(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+                {vehicleModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", maxWidth: 520, margin: "0 auto", background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, flexDirection: isMobile ? "column" : "row", width: isMobile ? "100%" : undefined, boxSizing: "border-box" }}>
+            <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: "#fff", boxSizing: "border-box" }} placeholder={searchMode === "vehicle" ? `Search tires for ${vehicleYear} ${vehicleMake} ${vehicleModel}` : "Search by size, brand, or model (e.g. 225/55R17)..."} value={search} onChange={e => setSearch(e.target.value)} />
+            <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap", ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>{searchMode === "vehicle" ? "Search by Vehicle" : "Search Tires"}</button>
+          </div>
+          <div style={{ display: "flex", gap: 20, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
+            {[["📍","1420 Wade Hampton Blvd, Greenville SC"],["🕐","Mon–Fri 8am–6pm · Sat 8am–4pm"],["⭐","4.9/5 — 127 reviews"]].map(([icon, text]) => <span key={text} style={{ color: "rgba(255,255,255,0.6)", fontSize: 14 }}>{icon} {text}</span>)}
+          </div>
         </div>
       </div>
+      {/* Trust Badges */}
+      <div style={{ background: "#fff", borderBottom: `1px solid ${COLORS.gray200}`, padding: "32px 40px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)"), gap: 16, maxWidth: 900, margin: "0 auto" }}>
+          {[["✅","Licensed & Insured","Full coverage"],["⭐","5-Star Rated","127 reviews"],["⚡","Same Day Service","Available today"],["🔧","Expert Installation","20+ years"]].map(([icon, title, sub]) => <div key={title} style={{ background: COLORS.gray50, borderRadius: 10, padding: "16px 14px", textAlign: "center" }}>
+            <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.navy, marginBottom: 4 }}>{title}</div>
+            <div style={{ fontSize: 12, color: COLORS.gray500 }}>{sub}</div>
+          </div>)}
+        </div>
+      </div>
+      {/* Tire Size Finder Modal */}
+      {showTireSizeFinder && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 480, width: "100%" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Find Your Tire Size</h2>
+              <button onClick={() => setShowTireSizeFinder(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.gray400 }}>×</button>
+            </div>
+            <div style={{ background: COLORS.gray50, borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>
+              <svg width="140" height="140" viewBox="0 0 140 140" style={{ margin: "0 auto", display: "block" }}>
+                <circle cx="70" cy="70" r="65" fill="none" stroke="#999" strokeWidth="2" />
+                <circle cx="70" cy="70" r="55" fill="none" stroke="#666" strokeWidth="3" />
+                <text x="50" y="75" fontSize="12" fontWeight="bold" fill="#000">225</text>
+                <text x="82" y="75" fontSize="12" fontWeight="bold" fill="#000">55</text>
+                <text x="105" y="75" fontSize="12" fontWeight="bold" fill="#000">R17</text>
+                <line x1="45" y1="35" x2="45" y2="10" stroke="#1E6FD9" strokeWidth="2" />
+                <text x="15" y="28" fontSize="11" fill="#1E6FD9" fontWeight="bold">Width</text>
+                <line x1="80" y1="20" x2="100" y2="5" stroke="#1E6FD9" strokeWidth="2" />
+                <text x="85" y="8" fontSize="11" fill="#1E6FD9" fontWeight="bold">Ratio</text>
+                <line x1="120" y1="70" x2="135" y2="70" stroke="#1E6FD9" strokeWidth="2" />
+                <text x="115" y="90" fontSize="11" fill="#1E6FD9" fontWeight="bold">Rim</text>
+              </svg>
+            </div>
+            <p style={{ fontSize: 14, color: COLORS.gray600, marginBottom: 20, lineHeight: 1.6 }}>Look at the sidewall of your current tire. You'll see a number like <strong>225/55R17</strong>. Enter each part below to find matching tires.</p>
+            <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+              <div>
+                <label style={S.label}>Section Width (mm)</label>
+                <input style={S.input} placeholder="e.g. 225" value={tireWidth} onChange={e => setTireWidth(e.target.value)} />
+              </div>
+              <div>
+                <label style={S.label}>Aspect Ratio (%)</label>
+                <input style={S.input} placeholder="e.g. 55" value={tireAspectRatio} onChange={e => setTireAspectRatio(e.target.value)} />
+              </div>
+              <div>
+                <label style={S.label}>Rim Diameter (inches)</label>
+                <input style={S.input} placeholder="e.g. 17" value={tireRimSize} onChange={e => setTireRimSize(e.target.value)} />
+              </div>
+            </div>
+            <button onClick={() => { const size = `${tireWidth}/${tireAspectRatio}R${tireRimSize}`; setSearch(size); setShowTireSizeFinder(false); setTireWidth(""); setTireAspectRatio(""); setTireRimSize(""); }} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", fontWeight: 700 }}>Find These Tires →</button>
+          </div>
+        </div>
+      )}
+
       {/* Inventory */}
       <div style={{ padding: "60px 40px", background: COLORS.gray50 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h2 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>Tire Inventory</h2>
           <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowTireSizeFinder(true)} style={{ ...S.btn("secondary", "sm"), fontWeight: 700 }}>🔍 Find My Size</button>
             {["All","New","Used"].map(c => <button key={c} onClick={() => setCondFilter(c)} style={{ padding: "6px 16px", borderRadius: 8, fontSize: 14, cursor: "pointer", border: `1px solid ${condFilter === c ? storefront.primaryColor : COLORS.gray300}`, background: condFilter === c ? storefront.primaryColor : "#fff", color: condFilter === c ? "#fff" : COLORS.gray600 }}>{c}</button>)}
           </div>
         </div>
@@ -3737,6 +3858,29 @@ function Storefront({ nav }) {
           </div>)}
         </div>
       </div>
+      {/* Photo Gallery */}
+      <div style={{ padding: "60px 40px", background: "#fff" }}>
+        <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Our Work</h2>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)"), gap: 16, maxWidth: 900, margin: "0 auto" }}>
+          {galleryImages.map((img, idx) => (
+            <div key={idx} style={{ position: "relative", overflow: "hidden", borderRadius: 12, cursor: "pointer", aspectRatio: "4/3" }} onClick={() => { setShowLightbox(true); setLightboxIndex(idx); }}>
+              <img src={img} alt={"Gallery " + idx} style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.3s" }} onMouseEnter={e => e.target.style.transform = "scale(1.05)"} onMouseLeave={e => e.target.style.transform = "scale(1)"} />
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Lightbox */}
+      {showLightbox && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }}>
+            <img src={galleryImages[lightboxIndex]} alt="Gallery" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            <button onClick={() => setShowLightbox(false)} style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", fontSize: 32, cursor: "pointer", width: 50, height: 50, borderRadius: "50%" }}>×</button>
+            {lightboxIndex > 0 && <button onClick={() => setLightboxIndex(lightboxIndex - 1)} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", fontSize: 24, cursor: "pointer", width: 40, height: 40, borderRadius: "50%" }}>‹</button>}
+            {lightboxIndex < galleryImages.length - 1 && <button onClick={() => setLightboxIndex(lightboxIndex + 1)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", fontSize: 24, cursor: "pointer", width: 40, height: 40, borderRadius: "50%" }}>›</button>}
+            <div style={{ position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)", color: "#fff", fontSize: 14 }}>{lightboxIndex + 1} / {galleryImages.length}</div>
+          </div>
+        </div>
+      )}
       {/* Reviews */}
       <div style={{ padding: "60px 40px", background: COLORS.gray50 }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Customer Reviews</h2>
@@ -3747,6 +3891,49 @@ function Storefront({ nav }) {
             <div style={{ fontSize: 14, color: COLORS.gray500, lineHeight: 1.6 }}>{t}</div>
           </div>)}
         </div>
+      </div>
+      {/* Google Maps */}
+      <div style={{ padding: "60px 40px", background: "#fff" }}>
+        <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Find Us</h2>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 32, maxWidth: 1000, margin: "0 auto" }}>
+          <div style={{ borderRadius: 12, overflow: "hidden", height: 300 }}>
+            <iframe width="100%" height="100%" style={{ border: "none" }} src={`https://maps.google.com/maps?q=${encodeURIComponent(storefront.address)}&output=embed`} allowFullScreen="" loading="lazy" referrerPolicy="no-referrer-when-downgrade"></iframe>
+          </div>
+          {!isMobile && <div>
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>ADDRESS</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{storefront.address}</div>
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>PHONE</div>
+              <a href="tel:8645550142" style={{ fontSize: 16, fontWeight: 700, color: COLORS.blue, textDecoration: "none" }}>(864) 555-0142</a>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>HOURS</div>
+              <div style={{ fontSize: 14, color: COLORS.gray600, lineHeight: 1.6 }}>
+                <div>Mon–Fri: 8am–6pm</div>
+                <div>Saturday: 8am–4pm</div>
+                <div>Sunday: Closed</div>
+              </div>
+            </div>
+          </div>}
+        </div>
+        {isMobile && <div style={{ marginTop: 20, textAlign: "center" }}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>ADDRESS</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{storefront.address}</div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>PHONE</div>
+            <a href="tel:8645550142" style={{ fontSize: 14, fontWeight: 700, color: COLORS.blue, textDecoration: "none" }}>(864) 555-0142</a>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>HOURS</div>
+            <div style={{ fontSize: 13, color: COLORS.gray600, lineHeight: 1.6 }}>
+              <div>Mon–Fri: 8am–6pm · Sat: 8am–4pm · Sun: Closed</div>
+            </div>
+          </div>
+        </div>}
       </div>
       {/* Footer */}
       <div style={{ background: COLORS.navy, padding: "40px 40px", color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
