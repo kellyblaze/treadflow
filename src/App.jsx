@@ -2815,6 +2815,8 @@ function ShopSettings({ shopId, showToast }) {
   const [savingMobileService, setSavingMobileService] = useState(false);
   const [galleryImages, setGalleryImages] = useState([]);
   const [savingGallery, setSavingGallery] = useState(false);
+  const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, chatbot: true, announcement: true });
+  const [savingStorefrontSections, setSavingStorefrontSections] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -2822,7 +2824,7 @@ function ShopSettings({ shopId, showToast }) {
     (async () => {
       const { data, error } = await supabase
         .from("shops")
-        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, gallery_images")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, gallery_images, storefront_sections")
         .eq("id", shopId)
         .maybeSingle();
       if (cancelled) return;
@@ -2837,6 +2839,9 @@ function ShopSettings({ shopId, showToast }) {
       setMobileServiceHoursStart(data.mobile_service_hours_start || "8:00 AM");
       setMobileServiceHoursEnd(data.mobile_service_hours_end || "6:00 PM");
       setGalleryImages(Array.isArray(data.gallery_images) ? data.gallery_images : []);
+      if (data.storefront_sections && typeof data.storefront_sections === "object") {
+        setStorefrontSections(prev => ({ ...prev, ...data.storefront_sections }));
+      }
     })();
     return () => { cancelled = true; };
   }, [shopId, showToast]);
@@ -2876,6 +2881,21 @@ function ShopSettings({ shopId, showToast }) {
       return;
     }
     showToast("Gallery images saved.");
+  };
+
+  const saveStorefrontSections = async () => {
+    if (!shopId) return;
+    setSavingStorefrontSections(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({ storefront_sections: storefrontSections })
+      .eq("id", shopId);
+    setSavingStorefrontSections(false);
+    if (error) {
+      showToast(error.message || "Unable to save storefront sections.");
+      return;
+    }
+    showToast("Storefront sections saved.");
   };
 
   return <div>
@@ -2954,6 +2974,24 @@ function ShopSettings({ shopId, showToast }) {
           </div>
         ))}
         <button onClick={saveGalleryImages} disabled={savingGallery} style={S.btn("primary")}>{savingGallery ? "Saving…" : "Save Gallery Images"}</button>
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Storefront Sections</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 16 }}>Choose which sections appear on your public storefront.</div>
+        <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+          {[["hero_video", "Hero Video Background"], ["announcement", "Announcement Bar"], ["trust_badges", "Trust Badges"], ["size_finder", "Tire Size Finder Button"], ["services", "Services Section"], ["gallery", "Photo Gallery"], ["maps", "Google Maps"], ["reviews", "Customer Reviews"], ["chatbot", "Live Chatbot"]].map(([key, label]) => (
+            <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
+              <input
+                type="checkbox"
+                checked={storefrontSections[key] ?? true}
+                onChange={e => setStorefrontSections(prev => ({ ...prev, [key]: e.target.checked }))}
+                style={{ accentColor: COLORS.blue, width: 18, height: 18, cursor: "pointer" }}
+              />
+              <label style={{ fontSize: 14, color: COLORS.gray700, cursor: "pointer", flex: 1 }}>{label}</label>
+            </div>
+          ))}
+        </div>
+        <button onClick={saveStorefrontSections} disabled={savingStorefrontSections} style={S.btn("primary")}>{savingStorefrontSections ? "Saving…" : "Save Storefront Sections"}</button>
       </div>
     </div>
   </div>;
@@ -3256,7 +3294,7 @@ function Storefront({ nav }) {
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end")
+      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, storefront_sections")
       .eq("slug", PUBLIC_STOREFRONT_SLUG)
       .maybeSingle()
       .then(({ data }) => {
@@ -3271,6 +3309,7 @@ function Storefront({ nav }) {
           mobile_service_fee: data.mobile_service_fee ?? 50,
           mobile_service_hours_start: data.mobile_service_hours_start || "8:00 AM",
           mobile_service_hours_end: data.mobile_service_hours_end || "6:00 PM",
+          storefront_sections: (data.storefront_sections && typeof data.storefront_sections === "object") ? data.storefront_sections : {},
         });
       });
     return () => { cancelled = true; };
