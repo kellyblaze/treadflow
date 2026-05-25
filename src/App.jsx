@@ -2825,6 +2825,8 @@ function ShopSettings({ shopId, showToast }) {
   const [mobileServiceHoursStart, setMobileServiceHoursStart] = useState("8:00 AM");
   const [mobileServiceHoursEnd, setMobileServiceHoursEnd] = useState("6:00 PM");
   const [savingMobileService, setSavingMobileService] = useState(false);
+  const [heroVideoUrl, setHeroVideoUrl] = useState("");
+  const [savingHeroVideo, setSavingHeroVideo] = useState(false);
   const [galleryImages, setGalleryImages] = useState([]);
   const [savingGallery, setSavingGallery] = useState(false);
   const [galleryStorageMissing, setGalleryStorageMissing] = useState(false);
@@ -2837,7 +2839,7 @@ function ShopSettings({ shopId, showToast }) {
     (async () => {
       const { data, error } = await supabase
         .from("shops")
-        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, gallery_images, storefront_sections")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections")
         .eq("id", shopId)
         .maybeSingle();
       if (cancelled) return;
@@ -2851,6 +2853,7 @@ function ShopSettings({ shopId, showToast }) {
       setMobileServiceFee(data.mobile_service_fee ?? 50);
       setMobileServiceHoursStart(data.mobile_service_hours_start || "8:00 AM");
       setMobileServiceHoursEnd(data.mobile_service_hours_end || "6:00 PM");
+      setHeroVideoUrl(data.hero_video_url || "");
       setGalleryImages(Array.isArray(data.gallery_images) ? data.gallery_images : []);
       if (data.storefront_sections && typeof data.storefront_sections === "object") {
         setStorefrontSections(prev => ({ ...prev, ...data.storefront_sections }));
@@ -2879,6 +2882,22 @@ function ShopSettings({ shopId, showToast }) {
       return;
     }
     showToast("Mobile service settings saved.");
+  };
+
+  const saveHeroVideo = async () => {
+    if (!shopId) return;
+    setSavingHeroVideo(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({ hero_video_url: heroVideoUrl.trim() || null })
+      .eq("id", shopId);
+    setSavingHeroVideo(false);
+    if (error) {
+      showToast(error.message || "Unable to save hero video URL.");
+      return;
+    }
+    setHeroVideoUrl(heroVideoUrl.trim());
+    showToast("Hero video URL saved.");
   };
 
   const persistGalleryImages = async (images) => {
@@ -3018,6 +3037,25 @@ function ShopSettings({ shopId, showToast }) {
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Review Settings</div>
         <div style={{ marginBottom: 12 }}><label style={S.label}>Google Review Link</label><input style={S.input} placeholder="https://g.page/your-shop" defaultValue="" /></div>
         <button onClick={() => showToast("Settings saved!")} style={S.btn("primary")}>Save Changes</button>
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Hero Video</div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={S.label}>Hero Video URL</label>
+          <input
+            style={S.input}
+            value={heroVideoUrl}
+            onChange={e => setHeroVideoUrl(e.target.value)}
+            placeholder="Paste a direct video URL (mp4, webm) or leave blank for default"
+          />
+        </div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, lineHeight: 1.5, marginBottom: 14 }}>Use a direct video file URL ending in .mp4 or .webm. YouTube and Vimeo links will not work - use a direct file URL.</div>
+        <button onClick={saveHeroVideo} disabled={savingHeroVideo} style={S.btn("primary")}>{savingHeroVideo ? "Saving..." : "Save Hero Video"}</button>
+        {heroVideoUrl.trim() && (
+          <video controls muted style={{ width: "100%", marginTop: 14, borderRadius: 10, background: COLORS.navy, maxHeight: 180 }}>
+            <source src={heroVideoUrl.trim()} type={heroVideoUrl.trim().toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4"} />
+          </video>
+        )}
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Business Hours</div>
@@ -3253,6 +3291,7 @@ function buildMobileTimeSlots(startTime, endTime) {
 // alter table shops add column if not exists mobile_service_hours_start text default '8:00 AM';
 // alter table shops add column if not exists mobile_service_hours_end text default '6:00 PM';
 // alter table shops add column if not exists gallery_images text[] default array[]::text[];
+// -- alter table shops add column if not exists hero_video_url text;
 
 async function storefrontSubmitReservation(shopId, {
   orderTire,
@@ -3346,6 +3385,8 @@ function Storefront({ nav }) {
     mobile_service_fee: 50,
     mobile_service_hours_start: "8:00 AM",
     mobile_service_hours_end: "6:00 PM",
+    hero_video_url: "",
+    storefront_sections: {},
   });
   const [activePromotion, setActivePromotion] = useState(null);
   const [searchMode, setSearchMode] = useState("size");
@@ -3385,7 +3426,7 @@ function Storefront({ nav }) {
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, storefront_sections")
+      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections")
       .eq("slug", PUBLIC_STOREFRONT_SLUG)
       .maybeSingle()
       .then(({ data }) => {
@@ -3400,6 +3441,7 @@ function Storefront({ nav }) {
           mobile_service_fee: data.mobile_service_fee ?? 50,
           mobile_service_hours_start: data.mobile_service_hours_start || "8:00 AM",
           mobile_service_hours_end: data.mobile_service_hours_end || "6:00 PM",
+          hero_video_url: (data.hero_video_url || "").trim(),
           storefront_sections: (data.storefront_sections && typeof data.storefront_sections === "object") ? data.storefront_sections : {},
         });
       });
@@ -3541,6 +3583,10 @@ function Storefront({ nav }) {
     }
     return (t.brand + t.model + t.size).toLowerCase().includes(search.toLowerCase());
   });
+  const defaultHeroVideoUrl = "https://videos.pexels.com/video-files/4065675/4065675-uhd_2560_1440_24fps.mp4";
+  const heroVideoUrl = publicShopInfo.hero_video_url || defaultHeroVideoUrl;
+  const heroVideoEnabled = publicShopInfo.storefront_sections?.hero_video !== false;
+  const heroVideoType = heroVideoUrl.toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4";
 
   const sendChat = () => {
     if (!chatInput.trim()) return;
@@ -3856,9 +3902,11 @@ function Storefront({ nav }) {
       )}
       {/* Hero with Video Background */}
       <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center", position: "relative", overflow: "hidden" }}>
-        <video autoPlay loop muted playsInline style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.3 }}>
-          <source src="https://videos.pexels.com/video-files/4065675/4065675-uhd_2560_1440_24fps.mp4" type="video/mp4" />
-        </video>
+        {heroVideoEnabled && (
+          <video autoPlay loop muted playsInline style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.3 }}>
+            <source src={heroVideoUrl} type={heroVideoType} />
+          </video>
+        )}
         <div style={{ position: "absolute", inset: 0, background: "rgba(10,22,40,0.7)" }} />
         <div style={{ position: "relative", zIndex: 1 }}>
           <h1 style={{ fontSize: 44, fontWeight: 800, color: "#fff", margin: "0 auto 16px", maxWidth: 700, lineHeight: 1.2 }}>{storefront.hero}</h1>
