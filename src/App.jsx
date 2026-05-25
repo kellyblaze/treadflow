@@ -1108,7 +1108,18 @@ function ShopDashboard({ nav }) {
   const shopLocationLine = activeShop ? [activeShop.city, activeShop.state].filter(Boolean).join(", ") : "";
 
   const sidebar = [
-    ["overview","📊","Overview"],["inventory","📦","Inventory"],["orders","📋","Orders"],["mobile","🚗","Mobile"],["appointments","📅","Appointments"],["customers","👥","Customers"],["promotions","📣","Promotions"],["analytics","📈","Analytics"],["staff","👤","Staff"],["settings","⚙️","Settings"],["billing","💳","Billing"],
+    ["overview","📊","Overview"],
+    ["inventory","📦","Inventory"],
+    ["orders","📋","Orders"],
+    ["mobile","🚗","Mobile"],
+    ["appointments","📅","Appointments"],
+    ["customers","👥","Customers"],
+    ["promotions","📣","Promotions"],
+    ["analytics","📈","Analytics"],
+    ["design","🎨","Design"],
+    ["staff","👥","Staff"],
+    ["settings","⚙️","Settings"],
+    ["billing","💳","Billing"],
   ];
 
   const handleLogout = async () => {
