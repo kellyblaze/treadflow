@@ -75,6 +75,15 @@ const mockTires = [
 /** Public demo storefront resolves `shops.id` by slug; UUID fallback if row is missing (not used in the authenticated dashboard). */
 const PUBLIC_STOREFRONT_SLUG = "greenville-tire-pros";
 const FALLBACK_PUBLIC_SHOP_ID = "00000000-0000-0000-0000-000000000001";
+const SHOP_PUBLIC_URL = "https://www.treadflow.cc";
+
+function tireSlug(tire) {
+  return [tire?.brand, tire?.model, tire?.size].filter(Boolean).join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function tirePagePath(tire, shopSlug = PUBLIC_STOREFRONT_SLUG) {
+  return `/shop/${shopSlug}/${tireSlug(tire)}`;
+}
 
 function tireFromSupabaseRow(row) {
   const price = Number(row.price);
@@ -1672,6 +1681,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   const saveTireChanges = async () => {
     const price = parseMoney(editPrice);
     const quantity = parseInt(String(editQty).replace(/\D/g, ""), 10) || 0;
+    const wasOutOfStock = Number(selectedTire.qty) === 0;
     const { error } = await supabase
       .from("tires")
       .update({ price, quantity })
@@ -1682,7 +1692,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     }
     const setPriceVal = parseMoney(editSetPrice) || +(price * 4).toFixed(2);
     setTires(ts => ts.map(t => (t.id === selectedTire.id ? { ...t, price, qty: quantity, setPrice: setPriceVal } : t)));
-    showToast("Tire updated");
+    showToast(wasOutOfStock && quantity > 0 ? "Don't forget to notify waitlist customers!" : "Tire updated");
     setSelectedTire(null);
   };
 
@@ -2627,6 +2637,7 @@ function AnalyticsPage({ shopId, showToast }) {
   const [analyticsOrders, setAnalyticsOrders] = useState([]);
   const [analyticsTires, setAnalyticsTires] = useState([]);
   const [analyticsCustomers, setAnalyticsCustomers] = useState([]);
+  const [storefrontViewsThisMonth, setStorefrontViewsThisMonth] = useState(0);
 
   useEffect(() => {
     if (!shopId) {
@@ -2637,10 +2648,12 @@ function AnalyticsPage({ shopId, showToast }) {
     const loadAnalytics = async () => {
       setLoading(true);
       try {
-        const [ordersResponse, tiresResponse, customersResponse] = await Promise.all([
+        const monthStartIso = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+        const [ordersResponse, tiresResponse, customersResponse, viewsResponse] = await Promise.all([
           supabase.from("orders").select("*").eq("shop_id", shopId),
           supabase.from("tires").select("*").eq("shop_id", shopId),
           supabase.from("customers").select("*").eq("shop_id", shopId),
+          supabase.from("storefront_views").select("id", { count: "exact", head: true }).eq("shop_id", shopId).gte("created_at", monthStartIso),
         ]);
 
         if (!mounted) return;
@@ -2653,6 +2666,7 @@ function AnalyticsPage({ shopId, showToast }) {
         setAnalyticsOrders((ordersResponse.data || []).map(orderFromSupabaseRow));
         setAnalyticsTires((tiresResponse.data || []).map(tireFromSupabaseRow));
         setAnalyticsCustomers((customersResponse.data || []).map(customerFromSupabaseRow));
+        if (!viewsResponse.error) setStorefrontViewsThisMonth(viewsResponse.count || 0);
       } catch (error) {
         console.error("Analytics fetch exception", error);
         if (mounted) showToast("Unable to load analytics data.");
@@ -2716,7 +2730,7 @@ function AnalyticsPage({ shopId, showToast }) {
 
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Analytics</h2>
-    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 14, marginBottom: 24 }}>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(5, 1fr)", isMobile), gap: 14, marginBottom: 24 }}>
       <div style={S.metricCard(thisMonthRevenue > lastMonthRevenue ? COLORS.green : COLORS.orange)}>
         <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>Revenue This Month</div>
         <div style={{ fontSize: 22, fontWeight: 700 }}>${thisMonthRevenue.toFixed(0)}</div>
@@ -2736,6 +2750,11 @@ function AnalyticsPage({ shopId, showToast }) {
         <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>Avg Order Value</div>
         <div style={{ fontSize: 22, fontWeight: 700 }}>${avgOrderValue}</div>
         <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 6 }}>this month</div>
+      </div>
+      <div style={S.metricCard()}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>Storefront Views This Month</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{storefrontViewsThisMonth}</div>
+        <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 6 }}>tracked visits</div>
       </div>
     </div>
     <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
@@ -3122,6 +3141,26 @@ function ShopSettings({ shopId, showToast }) {
         </div>
         <button onClick={saveStorefrontSections} disabled={savingStorefrontSections} style={S.btn("primary")}>{savingStorefrontSections ? "Saving…" : "Save Storefront Sections"}</button>
       </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>QR Code</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 14 }}>Put this on receipts, business cards, your shop window, or anywhere customers can scan it to find your tires online</div>
+        <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(SHOP_PUBLIC_URL)}`} alt="Shop storefront QR code" style={{ width: 200, height: 200, display: "block", border: `1px solid ${COLORS.gray200}`, borderRadius: 10, marginBottom: 14 }} />
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <a href={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(SHOP_PUBLIC_URL)}`} download="treadflow-storefront-qr.png" style={{ ...S.btn("primary"), textDecoration: "none" }}>Download</a>
+          <button
+            type="button"
+            onClick={() => {
+              const printWindow = window.open("", "_blank", "width=420,height=520");
+              if (!printWindow) return;
+              printWindow.document.write(`<html><head><title>Storefront QR Code</title></head><body style="font-family:system-ui,sans-serif;text-align:center;padding:32px"><h2>${storefront.name}</h2><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(SHOP_PUBLIC_URL)}" width="200" height="200"/><p>${SHOP_PUBLIC_URL}</p><script>window.onload=()=>window.print()</script></body></html>`);
+              printWindow.document.close();
+            }}
+            style={S.btn("secondary")}
+          >
+            Print
+          </button>
+        </div>
+      </div>
     </div>
   </div>;
 }
@@ -3292,6 +3331,8 @@ function buildMobileTimeSlots(startTime, endTime) {
 // alter table shops add column if not exists mobile_service_hours_end text default '6:00 PM';
 // alter table shops add column if not exists gallery_images text[] default array[]::text[];
 // -- alter table shops add column if not exists hero_video_url text;
+// -- alter table waitlist: id uuid, shop_id uuid, tire_id uuid, tire_name text, email text, created_at timestamptz
+// -- create table storefront_views (id uuid default gen_random_uuid() primary key, shop_id uuid, page text, tire_id uuid, created_at timestamptz default now());
 
 async function storefrontSubmitReservation(shopId, {
   orderTire,
@@ -3372,7 +3413,7 @@ async function storefrontSubmitReservation(shopId, {
 }
 
 // ── 6. PUBLIC STOREFRONT ──────────────────────────────────────────────────
-function Storefront({ nav }) {
+function Storefront({ nav, initialTireSlug }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
@@ -3503,6 +3544,11 @@ function Storefront({ nav }) {
   const [search, setSearch] = useState("");
   const [condFilter, setCondFilter] = useState("All");
   const [selectedTire, setSelectedTire] = useState(null);
+  const [waitlistTire, setWaitlistTire] = useState(null);
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistSuccess, setWaitlistSuccess] = useState("");
+  const [waitlistSubmitting, setWaitlistSubmitting] = useState(false);
+  const [shareTire, setShareTire] = useState(null);
   const [showOrder, setShowOrder] = useState(false);
   const [orderTire, setOrderTire] = useState(null);
   const [orderDone, setOrderDone] = useState(false);
@@ -3575,9 +3621,11 @@ function Storefront({ nav }) {
   const [showLightbox, setShowLightbox] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [galleryImages, setGalleryImages] = useState([]);
+  const trackedHomeViewRef = useRef(false);
+  const trackedTireViewsRef = useRef(new Set());
 
   const filtered = mockTires.filter(t => {
-    if (t.status !== "Active" || (condFilter !== "All" && t.condition !== condFilter)) return false;
+    if ((t.status !== "Active" && Number(t.qty) !== 0) || (condFilter !== "All" && t.condition !== condFilter)) return false;
     if (searchMode === "vehicle") {
       return vehicleSearchSizes.includes(t.size);
     }
@@ -3587,6 +3635,127 @@ function Storefront({ nav }) {
   const heroVideoUrl = publicShopInfo.hero_video_url || defaultHeroVideoUrl;
   const heroVideoEnabled = publicShopInfo.storefront_sections?.hero_video !== false;
   const heroVideoType = heroVideoUrl.toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4";
+  const selectedTireUrl = selectedTire ? `${window.location.origin}${tirePagePath(selectedTire)}` : `${window.location.origin}/shop/${PUBLIC_STOREFRONT_SLUG}`;
+
+  useEffect(() => {
+    if (!initialTireSlug || selectedTire) return;
+    const match = mockTires.find(t => tireSlug(t) === initialTireSlug);
+    if (match) setSelectedTire(match);
+  }, [initialTireSlug, selectedTire]);
+
+  useEffect(() => {
+    if (!publicShopId || trackedHomeViewRef.current) return;
+    trackedHomeViewRef.current = true;
+    supabase.from("storefront_views").insert({ shop_id: publicShopId, page: "home" }).then(({ error }) => {
+      if (error) console.warn("Storefront view tracking failed:", error.message);
+    });
+  }, [publicShopId]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setSelectedTire(null);
+      document.title = "TreadFlow";
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTire) {
+      document.title = `${publicShopInfo.name || storefront.name} | TreadFlow`;
+      return;
+    }
+    const path = tirePagePath(selectedTire);
+    if (window.location.pathname !== path) window.history.pushState({ tireId: selectedTire.id }, "", path);
+    document.title = `${selectedTire.brand} ${selectedTire.model} ${selectedTire.size} - ${publicShopInfo.name || storefront.name} | TreadFlow`;
+    const trackKey = String(selectedTire.id);
+    if (publicShopId && !trackedTireViewsRef.current.has(trackKey)) {
+      trackedTireViewsRef.current.add(trackKey);
+      supabase.from("storefront_views").insert({ shop_id: publicShopId, page: "tire", tire_id: selectedTire.id }).then(({ error }) => {
+        if (error) console.warn("Tire view tracking failed:", error.message);
+      });
+    }
+  }, [publicShopId, publicShopInfo.name, selectedTire]);
+
+  const openWaitlist = (tire) => {
+    setWaitlistTire(tire);
+    setWaitlistEmail("");
+    setWaitlistSuccess("");
+  };
+
+  const submitWaitlist = async () => {
+    if (!waitlistTire || !waitlistEmail.trim()) return;
+    setWaitlistSubmitting(true);
+    const tireName = `${waitlistTire.brand} ${waitlistTire.model} ${waitlistTire.size}`;
+    const { error } = await supabase.from("waitlist").insert({
+      shop_id: publicShopId,
+      tire_id: waitlistTire.id,
+      tire_name: tireName,
+      email: waitlistEmail.trim(),
+      created_at: new Date().toISOString(),
+    });
+    setWaitlistSubmitting(false);
+    if (error) {
+      setWaitlistSuccess(error.message || "Unable to save your request.");
+      return;
+    }
+    setWaitlistSuccess("We will email you when this tire is back in stock!");
+  };
+
+  const openShare = (tire) => setShareTire(tire);
+
+  const copyShareLink = async () => {
+    const url = shareTire ? `${window.location.origin}${tirePagePath(shareTire)}` : selectedTireUrl;
+    await navigator.clipboard?.writeText(url);
+  };
+
+  const waitlistModal = waitlistTire && (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 420 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Get Notified When Available</h2>
+          <button onClick={() => setWaitlistTire(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.gray400 }}>×</button>
+        </div>
+        <div style={{ fontWeight: 700, color: COLORS.navy, marginBottom: 14 }}>{waitlistTire.brand} {waitlistTire.model} {waitlistTire.size}</div>
+        <label style={S.label}>Email</label>
+        <input type="email" value={waitlistEmail} onChange={e => setWaitlistEmail(e.target.value)} style={{ ...S.input, marginBottom: 14 }} placeholder="you@example.com" />
+        <button onClick={submitWaitlist} disabled={waitlistSubmitting} style={{ ...S.btn("orange"), width: "100%", justifyContent: "center" }}>{waitlistSubmitting ? "Submitting..." : "Submit"}</button>
+        {waitlistSuccess && <div style={{ fontSize: 13, color: waitlistSuccess.startsWith("We will") ? COLORS.green : COLORS.red, marginTop: 12 }}>{waitlistSuccess}</div>}
+      </div>
+    </div>
+  );
+
+  const shareUrl = shareTire ? `${window.location.origin}${tirePagePath(shareTire)}` : selectedTireUrl;
+  const shareName = shareTire ? `${shareTire.brand} ${shareTire.model} ${shareTire.size}` : "";
+  const shareModal = shareTire && (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Share Tire</h2>
+          <button onClick={() => setShareTire(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.gray400 }}>×</button>
+        </div>
+        <div style={{ background: COLORS.navy, color: "#fff", borderRadius: 12, padding: 20, minHeight: 210, display: "flex", flexDirection: "column", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: COLORS.orange, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900 }}>{(publicShopInfo.name || storefront.name).charAt(0)}</div>
+            <div style={{ fontWeight: 800 }}>{publicShopInfo.name || storefront.name}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.1 }}>{shareTire.brand} {shareTire.model}</div>
+            <div style={{ color: "#CBD5E1", marginTop: 4 }}>{shareTire.size} • {shareTire.condition}</div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end" }}>
+            <div style={{ color: COLORS.orange, fontSize: 30, fontWeight: 900 }}>${shareTire.price}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#CBD5E1" }}>TreadFlow</div>
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          <button onClick={copyShareLink} style={{ ...S.btn("primary"), justifyContent: "center" }}>Copy Link</button>
+          <button onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank")} style={{ ...S.btn("secondary"), justifyContent: "center" }}>Share to Facebook</button>
+          <a href={`sms:?body=${encodeURIComponent(`Check out this tire: ${shareName} $${shareTire.price} at ${publicShopInfo.name || storefront.name}: ${shareUrl}`)}`} style={{ ...S.btn("secondary"), justifyContent: "center", textDecoration: "none" }}>Share via Text</a>
+        </div>
+      </div>
+    </div>
+  );
 
   const sendChat = () => {
     if (!chatInput.trim()) return;
@@ -3867,12 +4036,19 @@ function Storefront({ nav }) {
           </div>
           <p style={{ fontSize: 14, color: COLORS.gray600, lineHeight: 1.7, marginBottom: 20 }}>{selectedTire.desc}</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <button onClick={() => { setOrderTire(selectedTire); setShowOrder(true); }} style={{ ...S.btn("orange", "lg"), justifyContent: "center", fontWeight: 700, ...(isMobile ? { width: "100%" } : {}) }}>Reserve Now →</button>
+            {selectedTire.qty === 0 ? (
+              <button onClick={() => openWaitlist(selectedTire)} style={{ ...S.btn("orange", "lg"), justifyContent: "center", fontWeight: 700, ...(isMobile ? { width: "100%" } : {}) }}>Notify Me When Available</button>
+            ) : (
+              <button onClick={() => { setOrderTire(selectedTire); setShowOrder(true); }} style={{ ...S.btn("orange", "lg"), justifyContent: "center", fontWeight: 700, ...(isMobile ? { width: "100%" } : {}) }}>Reserve Now →</button>
+            )}
+            <button onClick={() => openShare(selectedTire)} style={{ ...S.btn("secondary", "lg"), justifyContent: "center" }}>Share</button>
             <button style={{ ...S.btn("primary", "lg"), justifyContent: "center" }}>📅 Book Installation</button>
             <a href="tel:8645550142" style={{ ...S.btn("secondary", "lg"), justifyContent: "center", textDecoration: "none" }}>📞 Call Shop</a>
           </div>
         </div>
       </div>
+      {waitlistModal}
+      {shareModal}
     </div>
   );
 
@@ -4019,7 +4195,11 @@ function Storefront({ nav }) {
                 <div style={{ fontSize: 22, fontWeight: 800, color: storefront.primaryColor }}>${t.price}</div>
                 <div style={{ fontSize: 13, color: COLORS.gray400 }}>Qty: {t.qty}</div>
               </div>
-              <button onClick={e => { e.stopPropagation(); setOrderTire(t); setShowOrder(true); }} disabled={t.qty === 0} style={{ ...S.btn("orange"), width: "100%", justifyContent: "center", fontWeight: 700, opacity: t.qty === 0 ? 0.4 : 1 }}>Reserve Now</button>
+              {t.qty === 0 ? (
+                <button onClick={e => { e.stopPropagation(); openWaitlist(t); }} style={{ ...S.btn("orange"), width: "100%", justifyContent: "center", fontWeight: 700 }}>Notify Me When Available</button>
+              ) : (
+                <button onClick={e => { e.stopPropagation(); setOrderTire(t); setShowOrder(true); }} style={{ ...S.btn("orange"), width: "100%", justifyContent: "center", fontWeight: 700 }}>Reserve Now</button>
+              )}
             </div>
           </div>)}
         </div>
@@ -4143,6 +4323,8 @@ function Storefront({ nav }) {
         <a href="tel:8645550142" style={{ flex: 1, ...S.btn("dark"), justifyContent: "center", textDecoration: "none", background: COLORS.navy, fontSize: 16, fontWeight: 700 }}>📞 Call Now</a>
         <button onClick={() => nav("home")} style={{ ...S.btn("secondary", "sm"), color: "rgba(255,255,255,0.7)", background: "transparent", border: "1px solid rgba(255,255,255,0.3)", fontSize: 12 }}>← Home</button>
       </div>
+      {waitlistModal}
+      {shareModal}
     </div>
   );
 }
@@ -4395,11 +4577,14 @@ function SignUpPage({ nav }) {
 }
 
 export default function App() {
+  const initialStorefrontMatch = typeof window !== "undefined" ? window.location.pathname.match(/^\/shop\/([^/]+)\/([^/]+)\/?$/) : null;
   const [page, setPage] = useState(() => {
     if (typeof window !== "undefined" && window.location.pathname === "/sms-terms") return "sms-terms";
+    if (initialStorefrontMatch) return "storefront";
     if (typeof window !== "undefined" && window.location.search.includes("deposit_success=true")) return "storefront";
     return "home";
   });
+  const [initialTireSlug, setInitialTireSlug] = useState(initialStorefrontMatch?.[2] || "");
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [intendedPage, setIntendedPage] = useState("shop");
@@ -4437,6 +4622,7 @@ export default function App() {
       setPage("login");
       return;
     }
+    if (p !== "storefront") setInitialTireSlug("");
     setPage(p);
   };
 
@@ -4457,7 +4643,7 @@ export default function App() {
       {page === "onboarding" && <InviteOnboarding nav={nav} />}
       {page === "admin" && <SuperAdmin nav={nav} />}
       {page === "shop" && (authReady ? (session ? <ShopDashboard nav={nav} /> : <LoginPage nav={nav} />) : <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>Loading...</div>)}
-      {page === "storefront" && <Storefront nav={nav} />}
+      {page === "storefront" && <Storefront nav={nav} initialTireSlug={initialTireSlug} />}
       {page === "sms-terms" && <SmsTermsPage nav={nav} />}
     </div>
   );
