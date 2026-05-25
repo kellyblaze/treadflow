@@ -2818,6 +2818,7 @@ function StaffPage({ showToast }) {
 function ShopSettings({ shopId, showToast }) {
   console.log('ShopSettings shopId prop:', shopId);
   const isMobile = useWindowWidth() < 768;
+  const galleryInputRef = useRef(null);
   const [mobileServiceEnabled, setMobileServiceEnabled] = useState(false);
   const [mobileServiceRadius, setMobileServiceRadius] = useState(25);
   const [mobileServiceFee, setMobileServiceFee] = useState(50);
@@ -2826,6 +2827,7 @@ function ShopSettings({ shopId, showToast }) {
   const [savingMobileService, setSavingMobileService] = useState(false);
   const [galleryImages, setGalleryImages] = useState([]);
   const [savingGallery, setSavingGallery] = useState(false);
+  const [galleryStorageMissing, setGalleryStorageMissing] = useState(false);
   const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, chatbot: true, announcement: true });
   const [savingStorefrontSections, setSavingStorefrontSections] = useState(false);
 
@@ -2879,19 +2881,76 @@ function ShopSettings({ shopId, showToast }) {
     showToast("Mobile service settings saved.");
   };
 
-  const saveGalleryImages = async () => {
+  const persistGalleryImages = async (images) => {
     if (!shopId) return;
     setSavingGallery(true);
     const { error } = await supabase
       .from("shops")
-      .update({ gallery_images: galleryImages })
+      .update({ gallery_images: images })
       .eq("id", shopId);
     setSavingGallery(false);
     if (error) {
       showToast(error.message || "Unable to save gallery images.");
+      return false;
+    }
+    setGalleryImages(images);
+    return true;
+  };
+
+  const showGalleryBucketInstructions = () => {
+    setGalleryStorageMissing(true);
+    showToast("Create the shop-gallery storage bucket in Supabase, then try again.");
+  };
+
+  const handleGalleryUpload = async (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!shopId || selectedFiles.length === 0) return;
+    const remainingSlots = 6 - galleryImages.length;
+    if (remainingSlots <= 0) {
+      showToast("Photo gallery is limited to 6 images.");
       return;
     }
-    showToast("Gallery images saved.");
+    const files = selectedFiles.slice(0, remainingSlots);
+    setSavingGallery(true);
+    setGalleryStorageMissing(false);
+    const uploadedUrls = [];
+    for (const file of files) {
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        showToast("Only JPG, PNG, and WebP images are supported.");
+        continue;
+      }
+      const path = `${shopId}/${file.name}`;
+      const { error } = await supabase.storage
+        .from("shop-gallery")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (error) {
+        setSavingGallery(false);
+        if (/bucket/i.test(error.message || "")) showGalleryBucketInstructions();
+        else showToast(error.message || `Unable to upload ${file.name}.`);
+        return;
+      }
+      const { data } = supabase.storage.from("shop-gallery").getPublicUrl(path);
+      if (data?.publicUrl) uploadedUrls.push(data.publicUrl);
+    }
+    setSavingGallery(false);
+    if (uploadedUrls.length === 0) return;
+    const nextImages = [...galleryImages, ...uploadedUrls].slice(0, 6);
+    const saved = await persistGalleryImages(nextImages);
+    if (saved) showToast(`${uploadedUrls.length} image${uploadedUrls.length === 1 ? "" : "s"} uploaded.`);
+  };
+
+  const removeGalleryImage = async (imageUrl) => {
+    const nextImages = galleryImages.filter(img => img !== imageUrl);
+    const saved = await persistGalleryImages(nextImages);
+    if (!saved) return;
+    try {
+      const path = new URL(imageUrl).pathname.split("/shop-gallery/")[1];
+      if (path) await supabase.storage.from("shop-gallery").remove([decodeURIComponent(path)]);
+    } catch (error) {
+      console.warn("Gallery storage cleanup failed:", error);
+    }
+    showToast("Gallery image removed.");
   };
 
   const saveStorefrontSections = async () => {
@@ -2969,22 +3028,43 @@ function ShopSettings({ shopId, showToast }) {
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Photo Gallery</div>
-        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 12 }}>Paste up to 6 image URLs (one per line). These will display on your storefront in the "Our Work" section.</div>
-        {[0, 1, 2, 3, 4, 5].map(i => (
-          <div key={i} style={{ marginBottom: 8 }}>
-            <input
-              style={{ ...S.input, width: "100%" }}
-              placeholder={`Image URL ${i + 1}`}
-              value={galleryImages[i] || ""}
-              onChange={e => {
-                const newImages = [...galleryImages];
-                newImages[i] = e.target.value;
-                setGalleryImages(newImages.filter(img => img.trim()));
-              }}
-            />
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 12 }}>Upload up to 6 JPG, PNG, or WebP images for the storefront "Our Work" section.</div>
+        {galleryStorageMissing && (
+          <div style={{ background: "#FEF2F2", border: `1px solid ${COLORS.red}`, color: "#991B1B", borderRadius: 10, padding: 12, fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+            Supabase Storage bucket missing. In Supabase, go to Storage, create a public bucket named <strong>shop-gallery</strong>, then allow uploads for authenticated shop users.
           </div>
-        ))}
-        <button onClick={saveGalleryImages} disabled={savingGallery} style={S.btn("primary")}>{savingGallery ? "Saving…" : "Save Gallery Images"}</button>
+        )}
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+          multiple
+          onChange={handleGalleryUpload}
+          style={{ display: "none" }}
+        />
+        <button
+          onClick={() => galleryInputRef.current?.click()}
+          disabled={savingGallery || galleryImages.length >= 6}
+          style={S.btn("primary")}
+        >
+          {savingGallery ? "Uploading..." : galleryImages.length >= 6 ? "Gallery Full" : "Upload Images"}
+        </button>
+        <div style={{ fontSize: 12, color: COLORS.gray500, marginTop: 10 }}>{galleryImages.length}/6 images uploaded</div>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)"), gap: 10, marginTop: 14 }}>
+          {galleryImages.map((imageUrl) => (
+            <div key={imageUrl} style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 10, overflow: "hidden", background: COLORS.gray100, border: `1px solid ${COLORS.gray200}` }}>
+              <img src={imageUrl} alt="Shop gallery" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <button
+                type="button"
+                onClick={() => removeGalleryImage(imageUrl)}
+                aria-label="Remove gallery image"
+                style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: 999, border: "none", background: COLORS.red, color: "#fff", fontWeight: 800, cursor: "pointer", lineHeight: "24px", padding: 0 }}
+              >
+                X
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Storefront Sections</div>
@@ -3813,12 +3893,11 @@ function Storefront({ nav }) {
         </div>
       </div>
       {/* Trust Badges */}
-      <div style={{ background: "#fff", borderBottom: `1px solid ${COLORS.gray200}`, padding: "32px 40px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)"), gap: 16, maxWidth: 900, margin: "0 auto" }}>
-          {[["✅","Licensed & Insured","Full coverage"],["⭐","5-Star Rated","127 reviews"],["⚡","Same Day Service","Available today"],["🔧","Expert Installation","20+ years"]].map(([icon, title, sub]) => <div key={title} style={{ background: COLORS.gray50, borderRadius: 10, padding: "16px 14px", textAlign: "center" }}>
-            <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
-            <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.navy, marginBottom: 4 }}>{title}</div>
-            <div style={{ fontSize: 12, color: COLORS.gray500 }}>{sub}</div>
+      <div style={{ background: "#fff", borderBottom: `1px solid ${COLORS.gray200}`, padding: "8px 16px", maxHeight: 40, overflowX: "auto", overflowY: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: isMobile ? "flex-start" : "center", gap: 10, maxWidth: 900, margin: "0 auto", minWidth: "max-content" }}>
+          {[["✅","Licensed & Insured"],["⭐","5-Star Rated"],["⚡","Same Day Service"],["🔧","Expert Installation"]].map(([icon, title]) => <div key={title} style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.gray50, borderRadius: 8, padding: "3px 8px", whiteSpace: "nowrap", height: 22 }}>
+            <div style={{ fontSize: 13, lineHeight: 1 }}>{icon}</div>
+            <div style={{ fontWeight: 700, fontSize: 12, color: COLORS.navy, lineHeight: 1 }}>{title}</div>
           </div>)}
         </div>
       </div>
