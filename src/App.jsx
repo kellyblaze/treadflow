@@ -3631,7 +3631,7 @@ function Storefront({ nav, initialTireSlug }) {
     }
     return (t.brand + t.model + t.size).toLowerCase().includes(search.toLowerCase());
   });
-  const defaultHeroVideoUrl = "https://videos.pexels.com/video-files/4065675/4065675-uhd_2560_1440_24fps.mp4";
+  const defaultHeroVideoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
   const heroVideoUrl = publicShopInfo.hero_video_url || defaultHeroVideoUrl;
   const heroVideoEnabled = publicShopInfo.storefront_sections?.hero_video !== false;
   const heroVideoType = heroVideoUrl.toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4";
@@ -3671,7 +3671,9 @@ function Storefront({ nav, initialTireSlug }) {
     const trackKey = String(selectedTire.id);
     if (publicShopId && !trackedTireViewsRef.current.has(trackKey)) {
       trackedTireViewsRef.current.add(trackKey);
-      supabase.from("storefront_views").insert({ shop_id: publicShopId, page: "tire", tire_id: selectedTire.id }).then(({ error }) => {
+      const tireViewPayload = { shop_id: publicShopId, page: "tire" };
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(selectedTire.id))) tireViewPayload.tire_id = selectedTire.id;
+      supabase.from("storefront_views").insert(tireViewPayload).then(({ error }) => {
         if (error) console.warn("Tire view tracking failed:", error.message);
       });
     }
@@ -3687,19 +3689,22 @@ function Storefront({ nav, initialTireSlug }) {
     if (!waitlistTire || !waitlistEmail.trim()) return;
     setWaitlistSubmitting(true);
     const tireName = `${waitlistTire.brand} ${waitlistTire.model} ${waitlistTire.size}`;
-    const { error } = await supabase.from("waitlist").insert({
-      shop_id: publicShopId,
-      tire_id: waitlistTire.id,
-      tire_name: tireName,
-      email: waitlistEmail.trim(),
-      created_at: new Date().toISOString(),
-    });
-    setWaitlistSubmitting(false);
-    if (error) {
-      setWaitlistSuccess(error.message || "Unable to save your request.");
-      return;
+    try {
+      // Public storefront users need insert permission on waitlist via Supabase RLS policy.
+      const { error } = await supabase.from("waitlist").insert({
+        shop_id: publicShopId,
+        tire_id: waitlistTire.id,
+        tire_name: tireName,
+        email: waitlistEmail.trim(),
+        created_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+      setWaitlistSuccess("We will email you when this tire is back in stock!");
+    } catch (error) {
+      setWaitlistSuccess(error?.status === 403 || error?.code === "42501" ? "Unable to join waitlist. Please try again." : (error?.message || "Unable to save your request."));
+    } finally {
+      setWaitlistSubmitting(false);
     }
-    setWaitlistSuccess("We will email you when this tire is back in stock!");
   };
 
   const openShare = (tire) => setShareTire(tire);
