@@ -9,17 +9,19 @@ project), there was no record of the schema to rebuild from.
 
 This directory now tracks schema changes as SQL migrations going forward
 (`supabase/migrations/*.sql`, one file per task, all additive — see each
-file's header comment). **What it does not yet contain is a baseline capture
-of the tables that existed before this migration folder did**: `shops`,
-`tires`, `orders`, `customers`, `appointments`, `promotions`,
-`invite_codes`, `storefront_views`, `waitlist`, and the `shop-gallery`
-storage bucket. Claude has no Supabase CLI, no project credentials, and no
-outbound network access in the environment these migrations were written in
-— so capturing the *real* current schema for those tables is a step only you
-can do, using the CLI you already have linked to this project (see
-`supabase/.temp/project-ref` — ref `egaxolujduyhcomkbuum`).
+file's header comment). **What it does not natively contain is a verified
+baseline capture of the tables that existed before this migration folder
+did**: `shops`, `tires`, `orders`, `customers`, `appointments`,
+`promotions`, `invite_codes`, `storefront_views`, `waitlist`, and the
+`shop-gallery` storage bucket. Claude has no Supabase CLI, no project
+credentials, and no outbound network access in the environment these
+migrations were written in — so capturing the *real* current schema for
+those tables is a step only you can do. Which path applies depends on
+whether you still have access to the original project.
 
-## Step 1: Capture the real baseline (do this once)
+## If you still have access to the original project (ref `egaxolujduyhcomkbuum`)
+
+Do this — it's authoritative, unlike anything else in this file:
 
 ```bash
 # If you don't have the CLI: npm install -g supabase
@@ -32,17 +34,32 @@ supabase login
 supabase db pull
 ```
 
-This writes a new timestamped migration under `supabase/migrations/` containing
-the *actual* current definitions (types, constraints, indexes, RLS policies)
-for every pre-existing table. Commit that file. From that point on, this
-folder is the source of truth for the schema, and `supabase db pull` /
-`supabase db push` keep it in sync with the live project.
+This writes a new timestamped migration under `supabase/migrations/`
+containing the *actual* current definitions (types, constraints, indexes,
+RLS policies) for every pre-existing table. Commit that file, and **delete
+`20260719000000_foundational_schema.sql`** — it's a best-effort
+reconstruction meant only as a fallback for a project where the real
+schema is unreachable, and running both would fight over the same tables.
 
-## Step 2: Apply the migrations already written this session
+## If you're starting a brand-new, empty Supabase project instead
 
-Seven migrations (`20260720000000` through `20260720000007`) were written
-during this session's work and still need to be run against your project —
-review each one, then either paste it into the Supabase SQL editor or run:
+`20260719000000_foundational_schema.sql` is a from-scratch reconstruction
+of those same base tables, built entirely from what the app code itself
+was observed reading and writing — not a verified dump. Read its header
+comment before running it; it explains exactly what's reconstructed vs.
+genuinely unknown, and one known gap (platform-admin write access to
+`invite_codes`, which can't be added until after `20260720000000` runs).
+
+Its filename timestamp sorts before all the others on purpose — several
+of them (`shop_staff`, `invoices`) have foreign keys into `shops`/`orders`
+and will fail to apply if those tables don't exist yet.
+
+## Apply the migrations
+
+Ten migrations now live in this folder — the foundational one above (only
+if starting from empty) plus nine written during this session's audit
+work (`20260720000000` through `20260720000008`). Review each one, then
+either paste it into the Supabase SQL editor or run:
 
 ```bash
 supabase db push
@@ -50,16 +67,18 @@ supabase db push
 
 Each file's header comment explains what it does and confirms it's additive
 (new tables/columns/policies only — nothing here drops or alters existing
-owner-scoped access).
+owner-scoped access), except the foundational one, which necessarily
+creates the base tables from nothing.
 
 ## What's confirmed vs. unverified
 
-The table below is **not a schema** — don't run it as one. It's a running
-list of columns this session directly observed the app code read or write,
-gathered while building tasks #1–#10, to help you sanity-check the real
-`db pull` output once you have it. Anything not listed here (types,
-defaults, constraints, indexes, RLS policies, and any column the app never
-happened to touch) is genuinely unknown from this side.
+The table below is **not a schema** — the executable version of this same
+information is `20260719000000_foundational_schema.sql`. This table exists
+to sanity-check the real `db pull` output against, once you have it: it's a
+running list of columns this session directly observed the app code read
+or write. Anything not listed here (types, defaults, constraints, indexes,
+RLS policies, and any column the app never happened to touch) is genuinely
+unknown from this side.
 
 | Table | Columns observed in app code |
 |---|---|
