@@ -5,6 +5,39 @@ export const config = {
   api: { bodyParser: false },
 };
 
+// Same env vars as api/create-checkout-session.js — maps a Stripe Price ID
+// back to a plan name so subscription.updated can detect upgrades/downgrades.
+const PRICE_ENV_BY_PLAN = {
+  "Early Partner": "STRIPE_PRICE_EARLY_PARTNER",
+  "Growth Partner": "STRIPE_PRICE_GROWTH_PARTNER",
+  "Market Leader": "STRIPE_PRICE_MARKET_LEADER",
+};
+
+function planForPriceId(priceId) {
+  if (!priceId) return null;
+  for (const [plan, envVar] of Object.entries(PRICE_ENV_BY_PLAN)) {
+    if (process.env[envVar] === priceId) return plan;
+  }
+  return null;
+}
+
+function statusForSubscription(subscriptionStatus) {
+  switch (subscriptionStatus) {
+    case "active":
+    case "trialing":
+      return "Active";
+    case "past_due":
+    case "unpaid":
+    case "incomplete":
+      return "Past Due";
+    case "canceled":
+    case "incomplete_expired":
+      return "Cancelled";
+    default:
+      return null;
+  }
+}
+
 async function readRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -13,27 +46,78 @@ async function readRawBody(req) {
   return Buffer.concat(chunks);
 }
 
+function extractCustomerId(object) {
+  return typeof object.customer === "string" ? object.customer : object.customer?.id ?? null;
+}
+
 async function resolveCustomerEmail(stripe, object) {
   if (object.customer_email) return object.customer_email;
-  const customerId =
-    typeof object.customer === "string" ? object.customer : object.customer?.id;
+  if (object.customer_details?.email) return object.customer_details.email;
+  const customerId = extractCustomerId(object);
   if (!customerId || !stripe) return null;
   const customer = await stripe.customers.retrieve(customerId);
   return customer.email ?? null;
 }
 
-async function activateShopByEmail(supabase, email) {
-  if (!email) return { updated: false, reason: "no email" };
+// Finds the shop for a webhook event's Stripe object, preferring the stored
+// stripe_customer_id (stable across email changes) and falling back to email
+// matching + backfilling stripe_customer_id for shops not linked yet.
+async function findShopForObject(supabase, stripe, object) {
+  const customerId = extractCustomerId(object);
 
-  const { data, error } = await supabase
-    .from("shops")
-    .update({ status: "Active" })
-    .eq("email", email.trim())
-    .select("id")
-    .maybeSingle();
+  if (customerId) {
+    const { data, error } = await supabase.from("shops").select("id, stripe_customer_id").eq("stripe_customer_id", customerId).maybeSingle();
+    if (error) throw error;
+    if (data) return { shopId: data.id, customerId };
+  }
 
+  const email = await resolveCustomerEmail(stripe, object);
+  if (!email) return { shopId: null, customerId };
+
+  const { data, error } = await supabase.from("shops").select("id").eq("email", email.trim()).maybeSingle();
   if (error) throw error;
-  return { updated: !!data, shopId: data?.id ?? null };
+  return { shopId: data?.id ?? null, customerId, email };
+}
+
+async function applyShopUpdate(supabase, shopId, updates) {
+  if (!shopId || Object.keys(updates).length === 0) return { updated: false };
+  const { data, error } = await supabase.from("shops").update(updates).eq("id", shopId).select("id").maybeSingle();
+  if (error) throw error;
+  return { updated: !!data };
+}
+
+async function handleCheckoutSessionCompleted(supabase, stripe, session) {
+  const { shopId, customerId } = await findShopForObject(supabase, stripe, session);
+  const plan = session.metadata?.plan || null;
+  return applyShopUpdate(supabase, shopId, {
+    status: "Active",
+    stripe_customer_id: customerId,
+    stripe_subscription_id: typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null,
+    ...(plan ? { plan } : {}),
+  });
+}
+
+async function handleSubscriptionUpsert(supabase, stripe, subscription) {
+  const { shopId, customerId } = await findShopForObject(supabase, stripe, subscription);
+  const status = statusForSubscription(subscription.status);
+  const priceId = subscription.items?.data?.[0]?.price?.id ?? null;
+  const plan = planForPriceId(priceId);
+  return applyShopUpdate(supabase, shopId, {
+    ...(status ? { status } : {}),
+    ...(plan ? { plan } : {}),
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscription.id,
+  });
+}
+
+async function handleSubscriptionDeleted(supabase, stripe, subscription) {
+  const { shopId, customerId } = await findShopForObject(supabase, stripe, subscription);
+  return applyShopUpdate(supabase, shopId, { status: "Cancelled", stripe_customer_id: customerId });
+}
+
+async function handleInvoiceStatus(supabase, stripe, invoice, status) {
+  const { shopId, customerId } = await findShopForObject(supabase, stripe, invoice);
+  return applyShopUpdate(supabase, shopId, { status, stripe_customer_id: customerId });
 }
 
 export default async function handler(req, res) {
@@ -68,32 +152,34 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 
-  const handledEvents = [
-    "customer.subscription.created",
-    "invoice.payment_succeeded",
-  ];
-
-  if (!handledEvents.includes(event.type)) {
-    return res.status(200).json({ received: true, handled: false });
-  }
-
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const email = await resolveCustomerEmail(stripe, event.data.object);
+    const object = event.data.object;
+    let result;
 
-    if (!email) {
-      console.warn(`No customer email for event ${event.id} (${event.type})`);
-      return res.status(200).json({ received: true, activated: false });
+    switch (event.type) {
+      case "checkout.session.completed":
+        result = await handleCheckoutSessionCompleted(supabase, stripe, object);
+        break;
+      case "customer.subscription.created":
+      case "customer.subscription.updated":
+        result = await handleSubscriptionUpsert(supabase, stripe, object);
+        break;
+      case "customer.subscription.deleted":
+        result = await handleSubscriptionDeleted(supabase, stripe, object);
+        break;
+      case "invoice.payment_succeeded":
+        result = await handleInvoiceStatus(supabase, stripe, object, "Active");
+        break;
+      case "invoice.payment_failed":
+        result = await handleInvoiceStatus(supabase, stripe, object, "Past Due");
+        break;
+      default:
+        return res.status(200).json({ received: true, handled: false });
     }
 
-    const result = await activateShopByEmail(supabase, email);
-    console.log(`Webhook ${event.type}:`, { email, ...result });
-
-    return res.status(200).json({
-      received: true,
-      activated: result.updated,
-      shopId: result.shopId,
-    });
+    console.log(`Webhook ${event.type}:`, result);
+    return res.status(200).json({ received: true, ...result });
   } catch (err) {
     console.error(`Webhook handler error (${event.type}):`, err);
     return res.status(500).json({ error: "Webhook handler failed" });

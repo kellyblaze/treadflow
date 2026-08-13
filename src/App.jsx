@@ -1,12 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabase";
-import { sendEmail, reservationConfirmation, orderNotification, orderStatusUpdate } from "./email";
-const redirectToCheckout = (paymentLink) => {
-  console.log("Redirecting to:", paymentLink);
-  if (!paymentLink) { alert("No payment link found!"); return; }
-  window.location.href = paymentLink;
-};
-
+import { sendEmail, reservationConfirmation, orderNotification, orderStatusUpdate, shopInviteEmail, staffInviteEmail, invoiceEmail } from "./email";
+import {
+  PLAN_TIER_DEFS,
+  planPrice,
+  genInviteCode,
+  tireFromSupabaseRow,
+  formatOrderCreatedDate,
+  orderFromSupabaseRow,
+  docNumberFor,
+  computeInvoiceTotals,
+  slugifyLocationName,
+  buildTireInsertPayload,
+  buildWaitlistPayload,
+  parseVehicleFields,
+} from "./helpers";
+const redirectTo = (url) => { window.location.href = url; };
 const sendSms = async (to, message) => {
   try {
     const res = await fetch("/api/send-sms", {
@@ -49,20 +58,6 @@ const COLORS = {
   purple: "#8B5CF6",
 };
 
-const mockApplications = [
-  { id: 1, shop: "Greenville Tire Pros", owner: "Marcus Williams", city: "Greenville", state: "SC", email: "marcus@greenvilletire.com", phone: "(864) 555-0142", status: "New", tires: "Both", inventory: "200+", plan: null, date: "2026-04-28", market: "Greenville, SC" },
-  { id: 2, shop: "Palmetto Used Tires", owner: "Sandra Chen", city: "Columbia", state: "SC", email: "sandra@palmettotires.com", phone: "(803) 555-0198", status: "Reviewing", tires: "Used", inventory: "500+", plan: "Growth Partner", date: "2026-04-25", market: "Columbia, SC" },
-  { id: 3, shop: "Carolina Wheel & Tire", owner: "James Rutherford", city: "Charlotte", state: "NC", email: "james@carolinawheel.com", phone: "(704) 555-0211", status: "Approved", tires: "Both", inventory: "300+", plan: "Early Partner", date: "2026-04-20", market: "Charlotte, NC" },
-  { id: 4, shop: "Low Country Tire Co", owner: "Brenda Simmons", city: "Charleston", state: "SC", email: "brenda@lowcountry.com", phone: "(843) 555-0177", status: "Waitlisted", tires: "New", inventory: "100-200", plan: null, date: "2026-04-18", market: "Charleston, SC" },
-  { id: 5, shop: "Peak Auto & Tire", owner: "Derek Foster", city: "Raleigh", state: "NC", email: "derek@peakauto.com", phone: "(919) 555-0263", status: "Invited", tires: "Both", inventory: "150+", plan: "Market Leader", date: "2026-04-15", market: "Raleigh, NC" },
-];
-
-const mockShops = [
-  { id: 1, name: "Greenville Tire Pros", owner: "Marcus Williams", city: "Greenville", state: "SC", status: "Active", plan: "Growth Partner", mrr: 249, tires: 47, orders: 23, since: "2025-11-01", slug: "greenville-tire-pros" },
-  { id: 2, name: "Palmetto Used Tires", owner: "Sandra Chen", city: "Columbia", state: "SC", status: "Trial", plan: "Early Partner", mrr: 149, tires: 112, orders: 8, since: "2026-03-15", slug: "palmetto-used-tires" },
-  { id: 3, name: "Carolina Wheel & Tire", owner: "James Rutherford", city: "Charlotte", state: "NC", status: "Active", plan: "Market Leader", mrr: 399, tires: 89, orders: 41, since: "2025-09-01", slug: "carolina-wheel-tire" },
-];
-
 const mockTires = [
   { id: 1, brand: "Michelin", model: "Defender T+H", size: "225/55R17", width: 225, aspect: 55, rim: 17, condition: "New", type: "All-Season", qty: 8, price: 139.99, setPrice: 519.99, tread: null, dot: "2524", load: 97, speed: "H", status: "Active", featured: true, installFee: 25, disposalFee: 5, desc: "Premium all-season touring tire with long tread life.", images: [] },
   { id: 2, brand: "Goodyear", model: "Assurance WeatherReady", size: "215/60R16", width: 215, aspect: 60, rim: 16, condition: "Used", type: "All-Season", qty: 4, price: 59.99, setPrice: 219.99, tread: "8/32", dot: "2221", load: 95, speed: "H", status: "Active", featured: false, installFee: 20, disposalFee: 5, desc: "Good condition used tires, passed inspection.", images: [] },
@@ -83,74 +78,6 @@ function tireSlug(tire) {
 
 function tirePagePath(tire, shopSlug = PUBLIC_STOREFRONT_SLUG) {
   return `/shop/${shopSlug}/${tireSlug(tire)}`;
-}
-
-function tireFromSupabaseRow(row) {
-  const price = Number(row.price);
-  const qty = Number(row.quantity);
-  return {
-    id: row.id,
-    shop_id: row.shop_id,
-    brand: row.brand ?? "",
-    model: row.model ?? "",
-    size: row.size ?? "",
-    condition: row.condition ?? "New",
-    qty,
-    price,
-    status: row.status ?? "Active",
-    created_at: row.created_at,
-    setPrice: +(price * 4).toFixed(2),
-    type: "All-Season",
-    tread: null,
-    dot: "",
-    load: 97,
-    speed: "H",
-    featured: false,
-    installFee: 25,
-    disposalFee: 5,
-    desc: "",
-    images: [],
-  };
-}
-
-function formatOrderCreatedDate(created_at) {
-  if (!created_at) return "";
-  const d = new Date(created_at);
-  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-}
-
-function tireLineFromOrderRow(row) {
-  const t = row.tires;
-  if (!t) return "Tire";
-  const tire = Array.isArray(t) ? t[0] : t;
-  if (!tire) return "Tire";
-  const parts = [tire.brand, tire.model, tire.size].filter(Boolean);
-  return parts.length ? parts.join(" ") : "Tire";
-}
-
-function orderFromSupabaseRow(row) {
-  const id = row.id;
-  const shortId = typeof id === "string" ? id.replace(/-/g, "").slice(0, 8) : String(id).slice(0, 8);
-  const orderLabel = shortId ? `ORD-${shortId}` : "ORD";
-  return {
-    id,
-    shop_id: row.shop_id,
-    tire_id: row.tire_id,
-    customer: row.customer_name ?? "",
-    email: row.customer_email ?? "",
-    phone: row.customer_phone ?? "",
-    tire: tireLineFromOrderRow(row),
-    qty: Number(row.quantity),
-    total: Number(row.total),
-    status: row.status ?? "Pending",
-    date: formatOrderCreatedDate(row.created_at),
-    apptDate: null,
-    vehicle: "—",
-    notes: "",
-    sms_consent: row.sms_consent === true,
-    created_at: row.created_at,
-    orderLabel,
-  };
 }
 
 function formatCustomerRecordDate(created_at) {
@@ -214,44 +141,6 @@ function appointmentFromSupabaseRow(row) {
   };
 }
 
-const mockOrders = [
-  { id: "ORD-1042", customer: "Terrence Hall", email: "terrence@email.com", phone: "(864) 555-9021", tire: "Michelin Defender T+H 225/55R17", qty: 4, total: 579.99, status: "Pending", date: "2026-05-01", apptDate: "2026-05-05", vehicle: "2019 Toyota Camry", notes: "Customer requested morning slot" },
-  { id: "ORD-1041", customer: "Angela Price", email: "angela@email.com", phone: "(864) 555-3344", tire: "Bridgestone Dueler H/L 265/70R17", qty: 2, total: 389.99, status: "Confirmed", date: "2026-04-30", apptDate: "2026-05-03", vehicle: "2021 Ford F-150", notes: "" },
-  { id: "ORD-1040", customer: "Devon Clark", email: "devon@email.com", phone: "(864) 555-7712", tire: "Goodyear Assurance 215/60R16", qty: 4, total: 279.99, status: "Completed", date: "2026-04-28", apptDate: "2026-04-30", vehicle: "2017 Honda Accord", notes: "Paid in full" },
-  { id: "ORD-1039", customer: "Shonda Meeks", email: "shonda@email.com", phone: "(864) 555-5501", tire: "Pirelli Scorpion Verde 245/50R20", qty: 4, total: 919.99, status: "Cancelled", date: "2026-04-25", apptDate: null, vehicle: "2022 BMW X5", notes: "Customer cancelled" },
-];
-
-const mockMarkets = [
-  { id: 1, city: "Greenville", state: "SC", name: "Greenville Metro", max: 3, active: 1, status: "Open" },
-  { id: 2, city: "Columbia", state: "SC", name: "Columbia Metro", max: 3, active: 2, status: "Limited" },
-  { id: 3, city: "Charlotte", state: "NC", name: "Charlotte Metro", max: 5, active: 5, status: "Full" },
-  { id: 4, city: "Charleston", state: "SC", name: "Lowcountry", max: 2, active: 2, status: "Waitlist Only" },
-  { id: 5, city: "Raleigh", state: "NC", name: "Triangle Area", max: 4, active: 1, status: "Open" },
-];
-
-const PLAN_TIER_DEFS = [
-  {
-    name: "Early Partner",
-    price: 149,
-    highlight: false,
-    paymentLink: "https://buy.stripe.com/7sY8wJ3IDbYS75H5Je4Rq00",
-    tierFeatures: ["Online tire storefront", "Inventory dashboard", "Online reservations", "Order management", "Basic SEO pages", "Email notifications"],
-  },
-  {
-    name: "Growth Partner",
-    price: 249,
-    highlight: true,
-    paymentLink: "https://buy.stripe.com/00w4gt2Ezgf83Tvb3y4Rq01",
-    tierFeatures: ["Online deposits/payments", "Appointment booking", "CSV inventory upload", "Staff accounts", "SMS notifications"],
-  },
-  {
-    name: "Market Leader",
-    price: 399,
-    highlight: false,
-    paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02",
-    tierFeatures: ["AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"],
-  },
-];
 
 const LOCAL_PLANS = PLAN_TIER_DEFS.map((tier, index) => {
   const { tierFeatures, ...plan } = tier;
@@ -374,6 +263,29 @@ function MetricCard({ label, value, sub, color }) {
 function LandingPage({ nav }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState(null);
+
+  const startCheckout = async (plan) => {
+    setCheckoutLoadingPlan(plan);
+    try {
+      const res = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) {
+        alert(data.error || "Unable to start checkout.");
+        setCheckoutLoadingPlan(null);
+        return;
+      }
+      redirectTo(data.url);
+    } catch (err) {
+      alert(err.message || "Unable to start checkout.");
+      setCheckoutLoadingPlan(null);
+    }
+  };
+
   const features = [
     { icon: "🛞", title: "Online Tire Storefront", desc: "Your own branded tire shop website with searchable inventory, live pricing, and tire detail pages." },
     { icon: "📦", title: "Inventory Management", desc: "Track new and used tires by size, brand, condition, tread depth, and quantity in real time." },
@@ -455,7 +367,7 @@ function LandingPage({ nav }) {
             <div style={{ fontSize: 40, fontWeight: 800, color: p.highlight ? COLORS.blue : COLORS.gray900 }}>${p.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
             <div style={{ borderTop: "1px solid #E2E8F0", margin: "20px 0" }} />
             {p.features.map(f => <div key={f} style={{ display: "flex", gap: 8, fontSize: 14, color: COLORS.gray700, marginBottom: 8 }}><span style={{ color: COLORS.green }}>✓</span>{f}</div>)}
-            <button onClick={() => redirectToCheckout(p.paymentLink)} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20 }}>Get Started →</button>
+            <button disabled={!!checkoutLoadingPlan} onClick={() => startCheckout(p.name)} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20, opacity: checkoutLoadingPlan && checkoutLoadingPlan !== p.name ? 0.6 : 1 }}>{checkoutLoadingPlan === p.name ? "Redirecting…" : "Get Started →"}</button>
           </div>)}
         </div>
         <div style={{ textAlign: "center", marginTop: 40, color: COLORS.gray500, fontSize: 13 }}>
@@ -495,9 +407,46 @@ function InvitePage({ nav }) {
   const isMobile = width < 768;
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ shopName: "", ownerName: "", phone: "", email: "", address: "", city: "", state: "", locations: "1", website: "", referralCode: "", tireType: "Both", inventory: "", currentMethod: "Spreadsheets", online: "No", installation: "Yes", features: [], notes: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const features = ["Online tire storefront","Inventory management","Online ordering","Appointment booking","Payments/deposits","AI chatbot","SEO/local marketing"];
   const set = (k, v) => setForm(f => ({...f, [k]: v}));
   const toggleFeat = f => set("features", form.features.includes(f) ? form.features.filter(x => x !== f) : [...form.features, f]);
+
+  const submitApplication = async () => {
+    if (!form.shopName.trim() || !form.ownerName.trim() || !form.email.trim()) {
+      setSubmitError("Shop name, owner name, and email are required.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    const { error } = await supabase.from("applications").insert({
+      shop_name: form.shopName.trim(),
+      owner_name: form.ownerName.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim() || null,
+      address: form.address.trim() || null,
+      city: form.city.trim() || null,
+      state: form.state.trim() || null,
+      website: form.website.trim() || null,
+      referral_code: form.referralCode.trim() || null,
+      locations: form.locations,
+      tire_type: form.tireType,
+      inventory_size: form.inventory || null,
+      current_method: form.currentMethod,
+      accepts_online_orders: form.online,
+      offers_installation: form.installation,
+      features: form.features,
+      notes: form.notes.trim() || null,
+      market: form.city && form.state ? `${form.city}, ${form.state}` : null,
+    });
+    setSubmitting(false);
+    if (error) {
+      setSubmitError(error.message || "Unable to submit application. Please try again.");
+      return;
+    }
+    setStep(2);
+  };
   if (step === 2) return (
     <div style={{ minHeight: "100vh", background: COLORS.navy, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: "60px 48px", textAlign: "center", maxWidth: 520 }}>
@@ -572,7 +521,8 @@ function InvitePage({ nav }) {
             <label style={S.label}>Additional Notes</label>
             <textarea style={{ ...S.input, height: 80, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} />
           </div>
-          <button onClick={() => setStep(2)} style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", marginTop: 24, fontWeight: 700 }}>Submit Application →</button>
+          {submitError && <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginTop: 16 }}>{submitError}</div>}
+          <button disabled={submitting} onClick={submitApplication} style={{ ...S.btn("orange", "lg"), width: "100%", justifyContent: "center", marginTop: 24, fontWeight: 700, opacity: submitting ? 0.7 : 1 }}>{submitting ? "Submitting…" : "Submit Application →"}</button>
         </div>
       </div>
     </div>
@@ -584,8 +534,20 @@ function MarketPage({ nav }) {
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [result, setResult] = useState(null);
+  const [markets, setMarkets] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from("markets").select("*").order("name", { ascending: true }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.warn("Markets fetch failed:", error); return; }
+      setMarkets(data || []);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const check = () => {
-    const found = mockMarkets.find(m => m.city.toLowerCase() === city.toLowerCase() && m.state.toLowerCase() === state.toLowerCase());
+    const found = markets.find(m => m.city.toLowerCase() === city.toLowerCase() && m.state.toLowerCase() === state.toLowerCase());
     if (!found) setResult("open");
     else if (found.status === "Full" || found.status === "Waitlist Only") setResult("full");
     else if (found.status === "Limited") setResult("limited");
@@ -615,7 +577,8 @@ function MarketPage({ nav }) {
         </div>}
         <div style={{ marginTop: 24, borderTop: "1px solid #E2E8F0", paddingTop: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.gray600, marginBottom: 12 }}>Current market snapshot</div>
-          {mockMarkets.slice(0, 4).map(m => <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          {markets.length === 0 && <div style={{ fontSize: 13, color: COLORS.gray400 }}>No markets listed yet.</div>}
+          {markets.slice(0, 4).map(m => <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <span style={{ fontSize: 13, color: COLORS.gray700 }}>{m.city}, {m.state}</span>
             <span style={S.badge(m.status)}>{m.status}</span>
           </div>)}
@@ -628,15 +591,131 @@ function MarketPage({ nav }) {
 // ── 4. SUPER ADMIN ───────────────────────────────────────────────────────
 function SuperAdmin({ nav }) {
   const [section, setSection] = useState("overview");
-  const [apps, setApps] = useState(mockApplications);
-  const [shops, setShops] = useState(mockShops);
+  const [apps, setApps] = useState([]);
+  const [appsLoading, setAppsLoading] = useState(true);
+  const [shops, setShops] = useState([]);
+  const [shopsLoading, setShopsLoading] = useState(true);
+  const [platformSettings, setPlatformSettings] = useState(null);
   const [selectedApp, setSelectedApp] = useState(null);
+  const [generatedCode, setGeneratedCode] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const [designShop, setDesignShop] = useState(null);
   const [toast, setToast] = useState(null);
   const [appFilter, setAppFilter] = useState("All");
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2800); };
-  const updateAppStatus = (id, status) => { setApps(a => a.map(x => x.id === id ? {...x, status} : x)); showToast(`Application status updated to ${status}`); setSelectedApp(null); };
+
+  const refreshApplications = useCallback(async () => {
+    setAppsLoading(true);
+    const { data, error } = await supabase.from("applications").select("*").order("created_at", { ascending: false });
+    setAppsLoading(false);
+    if (error) { showToast(error.message); return; }
+    setApps((data || []).map(a => ({
+      id: a.id,
+      shop: a.shop_name,
+      owner: a.owner_name,
+      city: a.city || "",
+      state: a.state || "",
+      email: a.email,
+      phone: a.phone || "",
+      status: a.status || "New",
+      tires: a.tire_type || "",
+      inventory: a.inventory_size || "",
+      plan: a.plan_interest || null,
+      date: a.created_at ? a.created_at.slice(0, 10) : "",
+      market: a.market || [a.city, a.state].filter(Boolean).join(", "),
+    })));
+  }, []);
+
+  const refreshShops = useCallback(async () => {
+    setShopsLoading(true);
+    const [{ data: shopRows, error: shopsErr }, { data: tireRows }, { data: orderRows }] = await Promise.all([
+      supabase.from("shops").select("*"),
+      supabase.from("tires").select("shop_id"),
+      supabase.from("orders").select("shop_id"),
+    ]);
+    setShopsLoading(false);
+    if (shopsErr) { showToast(shopsErr.message); return; }
+    const tireCounts = {};
+    (tireRows || []).forEach(t => { tireCounts[t.shop_id] = (tireCounts[t.shop_id] || 0) + 1; });
+    const orderCounts = {};
+    (orderRows || []).forEach(o => { orderCounts[o.shop_id] = (orderCounts[o.shop_id] || 0) + 1; });
+    setShops((shopRows || []).map(s => ({
+      id: s.id,
+      name: s.name,
+      owner: s.owner_name || "—",
+      city: s.city || "",
+      state: s.state || "",
+      status: s.status || "Trial",
+      plan: s.plan || "—",
+      mrr: s.status === "Active" ? planPrice(s.plan) : 0,
+      tires: tireCounts[s.id] || 0,
+      orders: orderCounts[s.id] || 0,
+      slug: s.slug,
+    })));
+  }, []);
+
+  const refreshPlatformSettings = useCallback(async () => {
+    const { data, error } = await supabase.from("platform_settings").select("*").eq("id", true).maybeSingle();
+    if (error) { showToast(error.message); return; }
+    setPlatformSettings(data);
+  }, []);
+
+  useEffect(() => { refreshApplications(); refreshShops(); refreshPlatformSettings(); }, [refreshApplications, refreshShops, refreshPlatformSettings]);
+
+  const updateAppStatus = async (id, status, plan) => {
+    const app = apps.find(a => a.id === id);
+    if (!app) return;
+    setActionLoading(true);
+    try {
+      let newCode = null;
+      if (status === "Invited") {
+        newCode = genInviteCode(app.state);
+        const expiryDays = platformSettings?.default_invite_expiry_days ?? 14;
+        const { error: codeErr } = await supabase.from("invite_codes").insert({
+          code: newCode,
+          status: "active",
+          expires_at: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString(),
+          email: app.email || null,
+          shop_name: app.shop || null,
+          plan: plan || app.plan || null,
+          application_id: id,
+        });
+        if (codeErr) throw codeErr;
+        if (app.email) {
+          const tpl = shopInviteEmail(app.shop, newCode, plan || app.plan || "Early Partner", expiryDays);
+          await sendEmail(app.email, tpl.subject, tpl.html);
+        }
+      }
+      const { error } = await supabase
+        .from("applications")
+        .update({ status, ...(plan ? { plan_interest: plan } : {}) })
+        .eq("id", id);
+      if (error) throw error;
+
+      setApps(a => a.map(x => (x.id === id ? { ...x, status, plan: plan || x.plan } : x)));
+      showToast(`Application status updated to ${status}`);
+      if (status === "Invited") {
+        setGeneratedCode(newCode);
+        setSelectedApp(prev => (prev && prev.id === id ? { ...prev, status, plan: plan || prev.plan } : prev));
+      } else {
+        setGeneratedCode(null);
+        setSelectedApp(null);
+      }
+    } catch (err) {
+      showToast(err.message || "Unable to update application.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const suspendShop = async (shop) => {
+    const nextStatus = shop.status === "Suspended" ? "Active" : "Suspended";
+    const { error } = await supabase.from("shops").update({ status: nextStatus }).eq("id", shop.id);
+    if (error) { showToast(error.message); return; }
+    setShops(s => s.map(x => (x.id === shop.id ? { ...x, status: nextStatus, mrr: nextStatus === "Active" ? planPrice(x.plan) : 0 } : x)));
+    showToast(nextStatus === "Suspended" ? `${shop.name} suspended` : `${shop.name} reactivated`);
+  };
 
   const sidebar = [
     ["overview","📊","Overview"],["applications","📋","Applications"],["shops","🏪","Shops"],["markets","📍","Markets"],["design","🎨","Storefront Design Studio"],["plans","💳","Plans & Billing"],["orders","📦","Orders"],["settings","⚙️","Settings"],
@@ -656,7 +735,7 @@ function SuperAdmin({ nav }) {
             <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>Super Admin</div>
           </div>
         </div>
-        {sidebar.map(([id, icon, label]) => <SidebarLink key={id} icon={icon} label={label} active={section === id} onClick={() => { setSection(id); setSelectedApp(null); }} />)}
+        {sidebar.map(([id, icon, label]) => <SidebarLink key={id} icon={icon} label={label} active={section === id} onClick={() => { setSection(id); setSelectedApp(null); setGeneratedCode(null); }} />)}
         <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 12 }}>
           <button onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)" }}>← Public Site</button>
           <button onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)", marginTop: 6 }}>Logout</button>
@@ -664,21 +743,21 @@ function SuperAdmin({ nav }) {
       </div>
       {/* Main */}
       <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
-        {section === "overview" && <AdminOverview shops={shops} apps={apps} nav={nav} setSection={setSection} />}
-        {section === "applications" && !selectedApp && <ApplicationsList apps={filteredApps} allApps={apps} filter={appFilter} setFilter={setAppFilter} onSelect={setSelectedApp} />}
-        {section === "applications" && selectedApp && <ApplicationDetail app={selectedApp} onBack={() => setSelectedApp(null)} onAction={updateAppStatus} />}
-        {section === "shops" && <ShopsList shops={shops} onDesign={s => { setDesignShop(s); setSection("design"); }} onView={s => nav("storefront")} showToast={showToast} />}
-        {section === "markets" && <MarketsPage showToast={showToast} />}
+        {section === "overview" && <AdminOverview shops={shops} apps={apps} loading={shopsLoading || appsLoading} />}
+        {section === "applications" && !selectedApp && (appsLoading ? <div style={{ color: COLORS.gray500 }}>Loading applications…</div> : <ApplicationsList apps={filteredApps} allApps={apps} filter={appFilter} setFilter={setAppFilter} onSelect={setSelectedApp} />)}
+        {section === "applications" && selectedApp && <ApplicationDetail app={selectedApp} onBack={() => { setSelectedApp(null); setGeneratedCode(null); }} onAction={updateAppStatus} actionLoading={actionLoading} inviteCode={generatedCode} />}
+        {section === "shops" && (shopsLoading ? <div style={{ color: COLORS.gray500 }}>Loading shops…</div> : <ShopsList shops={shops} onDesign={s => { setDesignShop(s); setSection("design"); }} onView={s => nav("storefront")} onSuspend={suspendShop} />)}
+        {section === "markets" && <MarketsPage shops={shops} defaultMaxShops={platformSettings?.max_shops_per_market ?? 3} showToast={showToast} />}
         {section === "design" && <StorefrontStudio shop={designShop || shops[0]} shops={shops} onShopChange={setDesignShop} showToast={showToast} />}
-        {section === "plans" && <PlansPage />}
-        {section === "orders" && <AdminOrders />}
-        {section === "settings" && <AdminSettings />}
+        {section === "plans" && <PlansPage shops={shops} />}
+        {section === "orders" && <AdminOrders showToast={showToast} />}
+        {section === "settings" && <AdminSettings settings={platformSettings} onSaved={refreshPlatformSettings} showToast={showToast} />}
       </div>
     </div>
   );
 }
 
-function AdminOverview({ shops, apps, setSection }) {
+function AdminOverview({ shops, apps, loading }) {
   const isMobile = useWindowWidth() < 768;
   const metrics = [
     { label: "Total Shops", value: shops.length, color: COLORS.blue },
@@ -692,25 +771,29 @@ function AdminOverview({ shops, apps, setSection }) {
   ];
   return <div>
     <div style={{ marginBottom: 24 }}><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Platform Overview</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>Real-time snapshot of TreadFlow</p></div>
-    <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 14, marginBottom: 28 }}>
-      {metrics.map(m => <MetricCard key={m.label} {...m} />)}
-    </div>
-    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
-      <div style={S.card}>
-        <div style={{ fontWeight: 700, marginBottom: 16 }}>Recent Applications</div>
-        {mockApplications.slice(0, 4).map(a => <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
-          <div><div style={{ fontSize: 14, fontWeight: 600 }}>{a.shop}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{a.city}, {a.state}</div></div>
-          <span style={S.badge(a.status)}>{a.status}</span>
-        </div>)}
+    {loading ? <div style={{ color: COLORS.gray500 }}>Loading…</div> : <>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(4, 1fr)", isMobile), gap: 14, marginBottom: 28 }}>
+        {metrics.map(m => <MetricCard key={m.label} {...m} />)}
       </div>
-      <div style={S.card}>
-        <div style={{ fontWeight: 700, marginBottom: 16 }}>Active Shops</div>
-        {mockShops.map(s => <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
-          <div><div style={{ fontSize: 14, fontWeight: 600 }}>{s.name}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{s.plan} · {s.tires} tires</div></div>
-          <span style={S.badge(s.status)}>{s.status}</span>
-        </div>)}
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
+        <div style={S.card}>
+          <div style={{ fontWeight: 700, marginBottom: 16 }}>Recent Applications</div>
+          {apps.length === 0 && <div style={{ fontSize: 13, color: COLORS.gray400 }}>No applications yet.</div>}
+          {apps.slice(0, 4).map(a => <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
+            <div><div style={{ fontSize: 14, fontWeight: 600 }}>{a.shop}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{a.city}, {a.state}</div></div>
+            <span style={S.badge(a.status)}>{a.status}</span>
+          </div>)}
+        </div>
+        <div style={S.card}>
+          <div style={{ fontWeight: 700, marginBottom: 16 }}>Shops</div>
+          {shops.length === 0 && <div style={{ fontSize: 13, color: COLORS.gray400 }}>No shops yet.</div>}
+          {shops.map(s => <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
+            <div><div style={{ fontSize: 14, fontWeight: 600 }}>{s.name}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{s.plan} · {s.tires} tires</div></div>
+            <span style={S.badge(s.status)}>{s.status}</span>
+          </div>)}
+        </div>
       </div>
-    </div>
+    </>}
   </div>;
 }
 
@@ -726,7 +809,7 @@ function ApplicationsList({ apps, allApps, filter, setFilter, onSelect }) {
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{["Shop","Owner","Location","Plan Interest","Status","Date",""].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{apps.map(a => <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => onSelect(a)}>
+        <tbody>{apps.length === 0 ? <tr><td style={S.td} colSpan={7}><span style={{ color: COLORS.gray400 }}>No applications match this filter.</span></td></tr> : apps.map(a => <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => onSelect(a)}>
           <td style={S.td}><div style={{ fontWeight: 600 }}>{a.shop}</div></td>
           <td style={S.td}>{a.owner}</td>
           <td style={S.td}>{a.city}, {a.state}</td>
@@ -740,7 +823,7 @@ function ApplicationsList({ apps, allApps, filter, setFilter, onSelect }) {
   </div>;
 }
 
-function ApplicationDetail({ app, onBack, onAction }) {
+function ApplicationDetail({ app, onBack, onAction, actionLoading, inviteCode }) {
   const isMobile = useWindowWidth() < 768;
   const [note, setNote] = useState("");
   const [plan, setPlan] = useState(app.plan || "Early Partner");
@@ -765,19 +848,19 @@ function ApplicationDetail({ app, onBack, onAction }) {
         <div style={S.card}>
           <div style={{ fontWeight: 700, marginBottom: 16 }}>Actions</div>
           <label style={S.label}>Assign Plan</label>
-          <select style={{ ...S.select, width: "100%", marginBottom: 16 }} value={plan} onChange={e => setPlan(e.target.value)}>
+          <select style={{ ...S.select, width: "100%", marginBottom: 16 }} value={plan} onChange={e => setPlan(e.target.value)} disabled={actionLoading}>
             {["Early Partner","Growth Partner","Market Leader"].map(p => <option key={p}>{p}</option>)}
           </select>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <button onClick={() => onAction(app.id, "Approved")} style={{ ...S.btn("primary"), justifyContent: "center" }}>✓ Approve Application</button>
-            <button onClick={() => onAction(app.id, "Invited")} style={{ ...S.btn("primary"), justifyContent: "center", background: COLORS.purple }}>✉ Generate & Send Invite</button>
-            <button onClick={() => onAction(app.id, "Waitlisted")} style={{ ...S.btn("secondary"), justifyContent: "center" }}>⏳ Waitlist</button>
-            <button onClick={() => onAction(app.id, "Rejected")} style={{ ...S.btn("danger"), justifyContent: "center" }}>✕ Reject</button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, opacity: actionLoading ? 0.6 : 1 }}>
+            <button disabled={actionLoading} onClick={() => onAction(app.id, "Approved", plan)} style={{ ...S.btn("primary"), justifyContent: "center" }}>✓ Approve Application</button>
+            <button disabled={actionLoading} onClick={() => onAction(app.id, "Invited", plan)} style={{ ...S.btn("primary"), justifyContent: "center", background: COLORS.purple }}>✉ Generate & Send Invite</button>
+            <button disabled={actionLoading} onClick={() => onAction(app.id, "Waitlisted")} style={{ ...S.btn("secondary"), justifyContent: "center" }}>⏳ Waitlist</button>
+            <button disabled={actionLoading} onClick={() => onAction(app.id, "Rejected")} style={{ ...S.btn("danger"), justifyContent: "center" }}>✕ Reject</button>
           </div>
-          {app.status === "Approved" && <div style={{ marginTop: 16, background: "#F0FDF4", borderRadius: 8, padding: "12px 14px" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.green, marginBottom: 4 }}>INVITE CODE</div>
-            <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, letterSpacing: 2, color: COLORS.gray800 }}>TF-SC-{Math.random().toString(36).substring(2, 8).toUpperCase()}</div>
-            <div style={{ fontSize: 12, color: COLORS.gray400, marginTop: 4 }}>Expires in 14 days</div>
+          {app.status === "Invited" && inviteCode && <div style={{ marginTop: 16, background: "#F0FDF4", borderRadius: 8, padding: "12px 14px" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.green, marginBottom: 4 }}>INVITE CODE SENT</div>
+            <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, letterSpacing: 2, color: COLORS.gray800 }}>{inviteCode}</div>
+            <div style={{ fontSize: 12, color: COLORS.gray400, marginTop: 4 }}>Expires in 14 days · emailed to {app.email}</div>
           </div>}
         </div>
       </div>
@@ -785,7 +868,7 @@ function ApplicationDetail({ app, onBack, onAction }) {
   </div>;
 }
 
-function ShopsList({ shops, onDesign, onView, showToast }) {
+function ShopsList({ shops, onDesign, onView, onSuspend }) {
   return <div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <div><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Shops</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>{shops.length} shops on platform</p></div>
@@ -793,7 +876,7 @@ function ShopsList({ shops, onDesign, onView, showToast }) {
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{["Shop","Owner","Plan","MRR","Tires","Orders","Status","Actions"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{shops.map(s => <tr key={s.id}>
+        <tbody>{shops.length === 0 ? <tr><td style={S.td} colSpan={8}><span style={{ color: COLORS.gray400 }}>No shops yet.</span></td></tr> : shops.map(s => <tr key={s.id}>
           <td style={S.td}><div style={{ fontWeight: 600 }}>{s.name}</div><div style={{ fontSize: 12, color: COLORS.gray400 }}>{s.city}, {s.state}</div></td>
           <td style={S.td}>{s.owner}</td>
           <td style={S.td}><span style={{ fontSize: 13, fontWeight: 600, color: COLORS.blue }}>{s.plan}</span></td>
@@ -805,7 +888,7 @@ function ShopsList({ shops, onDesign, onView, showToast }) {
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => onView(s)} style={{ ...S.btn("ghost", "sm") }}>View</button>
               <button onClick={() => onDesign(s)} style={{ ...S.btn("primary", "sm") }}>Design</button>
-              <button onClick={() => showToast(`${s.name} suspended`)} style={{ ...S.btn("danger", "sm") }}>Suspend</button>
+              <button onClick={() => onSuspend(s)} style={{ ...S.btn("danger", "sm") }}>{s.status === "Suspended" ? "Reactivate" : "Suspend"}</button>
             </div>
           </td>
         </tr>)}</tbody>
@@ -814,25 +897,86 @@ function ShopsList({ shops, onDesign, onView, showToast }) {
   </div>;
 }
 
-function MarketsPage({ showToast }) {
-  const [markets, setMarkets] = useState(mockMarkets);
+const MARKET_STATUSES = ["Open", "Limited", "Full", "Waitlist Only"];
+const emptyMarketForm = (maxShops) => ({ name: "", city: "", state: "", max_shops: maxShops, status: "Open" });
+
+function MarketsPage({ shops, defaultMaxShops = 3, showToast }) {
+  const [markets, setMarkets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null); // null = closed, "new" = create form, id = editing that row
+  const [form, setForm] = useState(() => emptyMarketForm(defaultMaxShops));
+  const [saving, setSaving] = useState(false);
+
+  const refreshMarkets = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("markets").select("*").order("name", { ascending: true });
+    setLoading(false);
+    if (error) { showToast(error.message); return; }
+    setMarkets(data || []);
+  }, [showToast]);
+
+  useEffect(() => { refreshMarkets(); }, [refreshMarkets]);
+
+  const activeCountFor = (m) => (shops || []).filter(s => s.status !== "Suspended" && (s.city || "").toLowerCase() === m.city.toLowerCase() && (s.state || "").toLowerCase() === m.state.toLowerCase()).length;
+
+  const openNew = () => { setForm(emptyMarketForm(defaultMaxShops)); setEditingId("new"); };
+  const openEdit = (m) => { setForm({ name: m.name, city: m.city, state: m.state, max_shops: m.max_shops, status: m.status }); setEditingId(m.id); };
+  const closeForm = () => setEditingId(null);
+
+  const saveMarket = async () => {
+    if (!form.name.trim() || !form.city.trim() || !form.state.trim()) {
+      showToast("Market name, city, and state are required.");
+      return;
+    }
+    setSaving(true);
+    const payload = { name: form.name.trim(), city: form.city.trim(), state: form.state.trim(), max_shops: Number(form.max_shops) || 1, status: form.status };
+    const { error } = editingId === "new"
+      ? await supabase.from("markets").insert(payload)
+      : await supabase.from("markets").update(payload).eq("id", editingId);
+    setSaving(false);
+    if (error) { showToast(error.message); return; }
+    showToast(editingId === "new" ? "Market added" : "Market updated");
+    setEditingId(null);
+    refreshMarkets();
+  };
+
   return <div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <div><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Markets</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>Manage market availability and capacity</p></div>
-      <button onClick={() => showToast("Add market form coming soon")} style={S.btn("primary")}>+ Add Market</button>
+      <button onClick={openNew} style={S.btn("primary")}>+ Add Market</button>
     </div>
+    {editingId && <div style={{ ...S.card, marginBottom: 20 }}>
+      <div style={{ fontWeight: 700, marginBottom: 12 }}>{editingId === "new" ? "New Market" : "Edit Market"}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div><label style={S.label}>Market Name</label><input style={S.input} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+        <div><label style={S.label}>Max Shops</label><input type="number" min={1} style={S.input} value={form.max_shops} onChange={e => setForm(f => ({ ...f, max_shops: e.target.value }))} /></div>
+        <div><label style={S.label}>City</label><input style={S.input} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
+        <div><label style={S.label}>State</label><input style={S.input} value={form.state} onChange={e => setForm(f => ({ ...f, state: e.target.value }))} /></div>
+      </div>
+      <label style={S.label}>Status</label>
+      <select style={{ ...S.select, width: "100%", marginBottom: 14 }} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+        {MARKET_STATUSES.map(s => <option key={s}>{s}</option>)}
+      </select>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button disabled={saving} onClick={saveMarket} style={{ ...S.btn("primary"), opacity: saving ? 0.7 : 1 }}>{saving ? "Saving…" : "Save"}</button>
+        <button onClick={closeForm} style={S.btn("secondary")}>Cancel</button>
+      </div>
+    </div>}
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{["Market","City","State","Capacity","Active","Status","Actions"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{markets.map(m => <tr key={m.id}>
-          <td style={S.td}><div style={{ fontWeight: 600 }}>{m.name}</div></td>
-          <td style={S.td}>{m.city}</td>
-          <td style={S.td}>{m.state}</td>
-          <td style={S.td}>{m.active}/{m.max}</td>
-          <td style={S.td}><div style={{ background: "#E2E8F0", borderRadius: 4, height: 6, width: 80 }}><div style={{ height: "100%", borderRadius: 4, background: m.active / m.max > 0.8 ? COLORS.red : COLORS.green, width: `${(m.active / m.max) * 100}%` }} /></div></td>
-          <td style={S.td}><span style={S.badge(m.status)}>{m.status}</span></td>
-          <td style={S.td}><button onClick={() => showToast("Market editor opened")} style={{ ...S.btn("ghost", "sm") }}>Edit</button></td>
-        </tr>)}</tbody>
+        <tbody>{loading ? <tr><td style={S.td} colSpan={7}><span style={{ color: COLORS.gray400 }}>Loading markets…</span></td></tr> : markets.length === 0 ? <tr><td style={S.td} colSpan={7}><span style={{ color: COLORS.gray400 }}>No markets yet.</span></td></tr> : markets.map(m => {
+          const active = activeCountFor(m);
+          return <tr key={m.id}>
+            <td style={S.td}><div style={{ fontWeight: 600 }}>{m.name}</div></td>
+            <td style={S.td}>{m.city}</td>
+            <td style={S.td}>{m.state}</td>
+            <td style={S.td}>{active}/{m.max_shops}</td>
+            <td style={S.td}><div style={{ background: "#E2E8F0", borderRadius: 4, height: 6, width: 80 }}><div style={{ height: "100%", borderRadius: 4, background: active / m.max_shops > 0.8 ? COLORS.red : COLORS.green, width: `${Math.min(100, (active / m.max_shops) * 100)}%` }} /></div></td>
+            <td style={S.td}><span style={S.badge(m.status)}>{m.status}</span></td>
+            <td style={S.td}><button onClick={() => openEdit(m)} style={{ ...S.btn("ghost", "sm") }}>Edit</button></td>
+          </tr>;
+        })}</tbody>
       </table>
     </div>
   </div>;
@@ -979,75 +1123,138 @@ function StorefrontStudio({ shop, shops, onShopChange, showToast }) {
   </div>;
 }
 
-function PlansPage() {
+function PlansPage({ shops }) {
   const isMobile = useWindowWidth() < 768;
+  const totalMrr = shops.reduce((a, s) => a + s.mrr, 0);
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Plans & Billing</h2>
     <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile), gap: 16 }}>
-      {[{name:"Early Partner",price:149,shops:1},{name:"Growth Partner",price:249,shops:1},{name:"Market Leader",price:399,shops:3}].map(p => <div key={p.name} style={S.card}>
+      {PLAN_TIER_DEFS.map(p => <div key={p.name} style={S.card}>
         <div style={{ fontWeight: 700, fontSize: 16 }}>{p.name}</div>
         <div style={{ fontSize: 28, fontWeight: 800, color: COLORS.blue, margin: "8px 0" }}>${p.price}<span style={{ fontSize: 14, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
-        <div style={{ fontSize: 13, color: COLORS.gray500 }}>{mockShops.filter((_, i) => i < p.shops).length} shops on this plan</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500 }}>{shops.filter(s => s.plan === p.name).length} shops on this plan</div>
       </div>)}
     </div>
     <div style={{ ...S.card, marginTop: 20 }}>
       <div style={{ fontWeight: 700, marginBottom: 16 }}>Shop Subscriptions</div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{["Shop","Plan","MRR","Status","Next Bill"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{mockShops.map(s => <tr key={s.id}>
+        <thead><tr>{["Shop","Plan","MRR","Status"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <tbody>{shops.length === 0 ? <tr><td style={S.td} colSpan={4}><span style={{ color: COLORS.gray400 }}>No shops yet.</span></td></tr> : shops.map(s => <tr key={s.id}>
           <td style={S.td}>{s.name}</td>
           <td style={S.td}>{s.plan}</td>
           <td style={{ ...S.td, color: COLORS.green, fontWeight: 700 }}>${s.mrr}</td>
           <td style={S.td}><span style={S.badge(s.status)}>{s.status}</span></td>
-          <td style={S.td}>Jun 1, 2026</td>
         </tr>)}
         <tr style={{ background: COLORS.gray50 }}>
           <td style={{ ...S.td, fontWeight: 700 }}>Total MRR</td>
           <td style={S.td}></td>
-          <td style={{ ...S.td, color: COLORS.green, fontWeight: 800, fontSize: 16 }}>${mockShops.reduce((a,s)=>a+s.mrr,0)}</td>
-          <td style={S.td}></td><td style={S.td}></td>
+          <td style={{ ...S.td, color: COLORS.green, fontWeight: 800, fontSize: 16 }}>${totalMrr}</td>
+          <td style={S.td}></td>
         </tr></tbody>
       </table>
     </div>
   </div>;
 }
 
-function AdminOrders() {
+function AdminOrders({ showToast }) {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, customer_name, quantity, total, status, created_at, shops(name)")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (cancelled) return;
+      setLoading(false);
+      if (error) { showToast?.(error.message); return; }
+      setOrders(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [showToast]);
+
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>All Orders</h2>
-    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
+    {loading ? <div style={{ color: COLORS.gray500 }}>Loading orders…</div> : <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{["Order","Customer","Shop","Tire","Total","Status","Date"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-        <tbody>{mockOrders.map(o => <tr key={o.id}>
-          <td style={{ ...S.td, fontWeight: 700, color: COLORS.blue }}>{o.id}</td>
-          <td style={S.td}>{o.customer}</td>
-          <td style={S.td}>Greenville Tire Pros</td>
-          <td style={S.td}><div style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.tire}</div></td>
+        <thead><tr>{["Order","Customer","Shop","Qty","Total","Status","Date"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <tbody>{orders.length === 0 ? <tr><td style={S.td} colSpan={7}><span style={{ color: COLORS.gray400 }}>No orders yet.</span></td></tr> : orders.map(o => <tr key={o.id}>
+          <td style={{ ...S.td, fontWeight: 700, color: COLORS.blue }}>ORD-{String(o.id).slice(0, 8)}</td>
+          <td style={S.td}>{o.customer_name}</td>
+          <td style={S.td}>{o.shops?.name || "—"}</td>
+          <td style={S.td}>{o.quantity}</td>
           <td style={{ ...S.td, fontWeight: 700 }}>${o.total}</td>
           <td style={S.td}><span style={S.badge(o.status)}>{o.status}</span></td>
-          <td style={S.td}>{o.date}</td>
+          <td style={S.td}>{formatOrderCreatedDate(o.created_at)}</td>
         </tr>)}</tbody>
       </table>
-    </div>
+    </div>}
   </div>;
 }
 
-function AdminSettings() {
+function AdminSettings({ settings, onSaved, showToast }) {
   const isMobile = useWindowWidth() < 768;
+  const [form, setForm] = useState({ platform_name: "", support_email: "", default_invite_expiry_days: 14, max_shops_per_market: 3 });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!settings) return;
+    setForm({
+      platform_name: settings.platform_name || "",
+      support_email: settings.support_email || "",
+      default_invite_expiry_days: settings.default_invite_expiry_days ?? 14,
+      max_shops_per_market: settings.max_shops_per_market ?? 3,
+    });
+  }, [settings]);
+
+  const save = async () => {
+    setSaving(true);
+    const { error } = await supabase.from("platform_settings").update({
+      platform_name: form.platform_name.trim() || "TreadFlow",
+      support_email: form.support_email.trim(),
+      default_invite_expiry_days: Number(form.default_invite_expiry_days) || 14,
+      max_shops_per_market: Number(form.max_shops_per_market) || 1,
+      updated_at: new Date().toISOString(),
+    }).eq("id", true);
+    setSaving(false);
+    if (error) { showToast(error.message); return; }
+    showToast("Settings saved");
+    onSaved?.();
+  };
+
+  const fields = [
+    ["platform_name", "Platform Name"],
+    ["support_email", "Support Email"],
+    ["default_invite_expiry_days", "Default Invite Expiry (days)"],
+    ["max_shops_per_market", "Max Shops Per Market"],
+  ];
+
   return <div>
     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 20 }}>Platform Settings</h2>
-    <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
-      {[["Platform Name","TreadFlow"],["Support Email","support@treadflow.io"],["Default Invite Expiry","14 days"],["Max Shops Per Market","3"]].map(([l, v]) => <div key={l} style={S.card}>
-        <label style={S.label}>{l}</label>
-        <input style={S.input} defaultValue={v} />
-      </div>)}
-    </div>
+    {!settings ? <div style={{ color: COLORS.gray500 }}>Loading…</div> : <>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 20 }}>
+        {fields.map(([key, label]) => <div key={key} style={S.card}>
+          <label style={S.label}>{label}</label>
+          <input
+            style={S.input}
+            type={key.includes("days") || key.includes("market") ? "number" : "text"}
+            value={form[key]}
+            onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+          />
+        </div>)}
+      </div>
+      <button disabled={saving} onClick={save} style={{ ...S.btn("primary"), marginTop: 20, opacity: saving ? 0.7 : 1 }}>{saving ? "Saving…" : "Save Settings"}</button>
+    </>}
     <div style={{ ...S.card, marginTop: 20 }}>
       <div style={{ fontWeight: 700, marginBottom: 16 }}>Database Schema</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {["platform_users","shops","shop_users","staff_invitations","invite_applications","invite_codes","markets","tires","tire_photos","orders","order_items","customers","appointments","shop_settings","storefront_templates","storefront_settings","storefront_sections","storefront_theme_versions","subscriptions","plans","payments","support_tickets","audit_logs"].map(t => <span key={t} style={{ background: COLORS.navy, color: "#93C5FD", fontSize: 12, padding: "3px 10px", borderRadius: 5, fontFamily: "monospace" }}>{t}</span>)}
+        {["platform_admins","platform_settings","applications","shops","shop_staff","invite_codes","markets","tires","orders","customers","appointments","promotions","storefront_views"].map(t => <span key={t} style={{ background: COLORS.navy, color: "#93C5FD", fontSize: 12, padding: "3px 10px", borderRadius: 5, fontFamily: "monospace" }}>{t}</span>)}
       </div>
-      <p style={{ fontSize: 13, color: COLORS.gray500, marginTop: 12 }}>All shop-owned tables include <code style={{ background: COLORS.gray100, padding: "1px 5px", borderRadius: 4 }}>shop_id</code> for multi-tenant isolation. Users can only access data for their own shop.</p>
+      <p style={{ fontSize: 13, color: COLORS.gray500, marginTop: 12 }}>Shop-owned tables include <code style={{ background: COLORS.gray100, padding: "1px 5px", borderRadius: 4 }}>shop_id</code> for multi-tenant isolation via row-level security.</p>
     </div>
   </div>;
 }
@@ -1086,25 +1293,36 @@ function ShopDashboard({ nav }) {
         setShopLoading(false);
         return;
       }
-      const { data, error } = await supabase
-        .from("shops")
-        .select("id, name, owner_name, email, city, state, status, plan, slug")
-        .eq("user_id", user.id)
-        .order("name", { ascending: true });
+      const [ownedRes, staffRes] = await Promise.all([
+        supabase
+          .from("shops")
+          .select("id, name, owner_name, email, city, state, status, plan, slug, google_review_url")
+          .eq("user_id", user.id)
+          .order("name", { ascending: true }),
+        supabase
+          .from("shop_staff")
+          .select("role, shops(id, name, owner_name, email, city, state, status, plan, slug, google_review_url)")
+          .eq("user_id", user.id)
+          .eq("status", "Active"),
+      ]);
       if (cancelled) return;
-      if (error) {
-        console.warn("Shop lookup failed:", error);
-
+      if (ownedRes.error) {
+        console.warn("Shop lookup failed:", ownedRes.error);
         setShops([]);
         setActiveShop(null);
       } else {
-        const shopsData = data || [];
-        setShops(shopsData);
+        const ownedShops = (ownedRes.data || []).map(s => ({ ...s, staffRole: "Owner" }));
+        const staffShops = (staffRes.data || [])
+          .filter(row => row.shops)
+          .map(row => ({ ...row.shops, staffRole: row.role }));
+        const merged = [...ownedShops];
+        staffShops.forEach(s => { if (!merged.some(m => m.id === s.id)) merged.push(s); });
+        setShops(merged);
         setActiveShop(prev => {
           if (prev) {
-            return shopsData.find(s => s.id === prev.id) || shopsData[0] || null;
+            return merged.find(s => s.id === prev.id) || merged[0] || null;
           }
-          return shopsData[0] || null;
+          return merged[0] || null;
         });
       }
       setShopLoading(false);
@@ -1112,24 +1330,38 @@ function ShopDashboard({ nav }) {
     return () => { cancelled = true; };
   }, []);
 
+  const staffRole = activeShop?.staffRole || "Owner";
+
   const shopId = activeShop?.id ?? null;
   const shopInitial = ((activeShop?.name || "?").trim().charAt(0) || "?").toUpperCase();
   const shopLocationLine = activeShop ? [activeShop.city, activeShop.state].filter(Boolean).join(", ") : "";
 
+  // Mirrors STAFF_ROLE_DESCRIPTIONS: Manager gets inventory/orders/appointments/customers,
+  // Inventory Staff gets inventory only, Order Staff gets orders/appointments only.
+  const ROLE_SECTIONS = {
+    Owner: null, // null = no restriction, sees everything
+    Manager: new Set(["overview", "pos", "inventory", "orders", "mobile", "appointments", "customers", "invoices"]),
+    "Inventory Staff": new Set(["overview", "inventory"]),
+    "Order Staff": new Set(["overview", "pos", "orders", "mobile", "appointments", "invoices"]),
+  };
+  const allowedSections = ROLE_SECTIONS[staffRole] ?? ROLE_SECTIONS.Owner;
   const sidebar = [
     ["overview","📊","Overview"],
+    ["pos","💵","Checkout"],
     ["inventory","📦","Inventory"],
     ["orders","📋","Orders"],
     ["mobile","🚗","Mobile"],
     ["appointments","📅","Appointments"],
     ["customers","👥","Customers"],
+    ["invoices","🧾","Invoices"],
     ["promotions","📣","Promotions"],
     ["analytics","📈","Analytics"],
     ["design","🎨","Design"],
     ["staff","👥","Staff"],
+    ["locations","🏬","Locations"],
     ["settings","⚙️","Settings"],
     ["billing","💳","Billing"],
-  ];
+  ].filter(([id]) => !allowedSections || allowedSections.has(id));
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -1213,14 +1445,17 @@ function ShopDashboard({ nav }) {
           </div>
         )}
         {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={activeShop?.name} shopLocation={shopLocationLine} />}
+        {section === "pos" && <POSPage shopId={shopId} shopName={activeShop?.name} tires={tires} setTires={setTires} showToast={showToast} />}
         {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
-        {section === "orders" && <OrdersPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} orders={orders} setOrders={setOrders} showToast={showToast} />}
+        {section === "orders" && <OrdersPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} googleReviewUrl={activeShop?.google_review_url} orders={orders} setOrders={setOrders} showToast={showToast} />}
         {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
         {section === "mobile" && <MobileJobsPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
+        {section === "invoices" && <InvoicesPage shopId={shopId} shopName={activeShop?.name} orders={orders} showToast={showToast} />}
         {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
         {section === "analytics" && <AnalyticsPage shopId={shopId} showToast={showToast} />}
-        {section === "staff" && <StaffPage showToast={showToast} />}
+        {section === "staff" && <StaffPage shopId={shopId} shopName={activeShop?.name} showToast={showToast} />}
+        {section === "locations" && <LocationsPage shops={shops} setShops={setShops} activeShop={activeShop} setActiveShop={setActiveShop} showToast={showToast} />}
         {section === "settings" && <ShopSettings shopId={shopId} showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
         {section === "billing" && <ShopBilling shopId={shopId} plan={activeShop?.plan} status={activeShop?.status} />}
@@ -1651,21 +1886,9 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   };
 
   const addTire = async () => {
-    const qty = +newTire.qty;
-    const price = +newTire.price;
-    const status = qty === 0 ? "Out of Stock" : "Active";
     const { data, error } = await supabase
       .from("tires")
-      .insert({
-        shop_id: shopId,
-        brand: newTire.brand,
-        model: newTire.model,
-        size: newTire.size,
-        condition: newTire.condition,
-        quantity: qty,
-        price,
-        status,
-      })
+      .insert(buildTireInsertPayload(newTire, shopId))
       .select()
       .single();
     if (error) {
@@ -1890,7 +2113,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   </div>;
 }
 
-function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast }) {
+function OrdersPage({ shopId, shopName, shopPhone, googleReviewUrl, orders, setOrders, showToast }) {
   const isMobile = useWindowWidth() < 768;
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
@@ -1949,9 +2172,8 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
     }
     
     // Send Google reviews email on completion
-    if (order?.email && status === "Completed") {
+    if (order?.email && status === "Completed" && googleReviewUrl) {
       try {
-        const googleReviewUrl = ""; // TODO: get from shop settings
         const reviewEmailHtml = `
           <p>Hi ${order.customer},</p>
           <p>Thank you for choosing ${shopName || "our shop"} for your tire service! We appreciate your business.</p>
@@ -1959,9 +2181,7 @@ function OrdersPage({ shopId, shopName, shopPhone, orders, setOrders, showToast 
           <p><a href="${googleReviewUrl}" style="background: #1E6FD9; color: white; padding: 12px 24px; borderRadius: 8px; textDecoration: none; display: inline-block;">Leave a Google Review</a></p>
           <p>Thanks for your support!</p>
         `;
-        if (googleReviewUrl) {
-          await sendEmail(order.email, `How was your experience at ${shopName || "our shop"}?`, reviewEmailHtml);
-        }
+        await sendEmail(order.email, `How was your experience at ${shopName || "our shop"}?`, reviewEmailHtml);
       } catch (e) {
         console.warn("google reviews email:", e);
       }
@@ -2631,6 +2851,365 @@ function PromotionsPage({ shopId, showToast }) {
   </div>;
 }
 
+const emptyInvoiceForm = { doc_type: "Invoice", customer_name: "", customer_email: "", customer_phone: "", order_id: "", tax_rate: 0, due_date: "", notes: "" };
+const emptyLineItem = { description: "", quantity: 1, unit_price: 0 };
+
+function InvoicesPage({ shopId, shopName, orders, showToast }) {
+  const isMobile = useWindowWidth() < 768;
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyInvoiceForm);
+  const [lineItems, setLineItems] = useState([{ ...emptyLineItem }]);
+  const [saving, setSaving] = useState(false);
+
+  const refreshInvoices = useCallback(async () => {
+    if (!shopId) return;
+    setLoading(true);
+    const { data, error } = await supabase.from("invoices").select("*").eq("shop_id", shopId).order("created_at", { ascending: false });
+    setLoading(false);
+    if (error) { showToast(error.message); return; }
+    setInvoices(data || []);
+  }, [shopId, showToast]);
+
+  useEffect(() => { refreshInvoices(); }, [refreshInvoices]);
+
+  const resetForm = () => { setForm(emptyInvoiceForm); setLineItems([{ ...emptyLineItem }]); };
+  const openNew = () => { resetForm(); setShowForm(true); };
+
+  const selectOrderForInvoice = (orderId) => {
+    const order = (orders || []).find(o => String(o.id) === orderId);
+    if (!order) { setForm(f => ({ ...f, order_id: "" })); return; }
+    const qty = Number(order.qty) || 1;
+    setForm(f => ({ ...f, order_id: orderId, customer_name: order.customer || f.customer_name, customer_email: order.email || f.customer_email, customer_phone: order.phone || f.customer_phone }));
+    setLineItems([{ description: order.tire || "Tire order", quantity: qty, unit_price: qty ? Number(order.total) / qty : Number(order.total) || 0 }]);
+  };
+
+  const updateLineItem = (index, field, value) => setLineItems(items => items.map((li, i) => i === index ? { ...li, [field]: value } : li));
+  const addLineItem = () => setLineItems(items => [...items, { ...emptyLineItem }]);
+  const removeLineItem = (index) => setLineItems(items => items.length > 1 ? items.filter((_, i) => i !== index) : items);
+
+  const { subtotal, taxAmount, total } = computeInvoiceTotals(lineItems, form.tax_rate);
+
+  const saveInvoice = async (send) => {
+    if (!form.customer_name.trim()) { showToast("Customer name is required."); return; }
+    const validItems = lineItems.filter(li => li.description.trim());
+    if (validItems.length === 0) { showToast("Add at least one line item."); return; }
+    setSaving(true);
+    const payload = {
+      shop_id: shopId,
+      order_id: form.order_id || null,
+      doc_type: form.doc_type,
+      status: send ? "Sent" : "Draft",
+      customer_name: form.customer_name.trim(),
+      customer_email: form.customer_email.trim() || null,
+      customer_phone: form.customer_phone.trim() || null,
+      line_items: validItems,
+      subtotal,
+      tax_rate: Number(form.tax_rate) || 0,
+      tax_amount: taxAmount,
+      total,
+      notes: form.notes.trim() || null,
+      due_date: form.due_date || null,
+    };
+    const { data, error } = await supabase.from("invoices").insert(payload).select().maybeSingle();
+    if (error) {
+      setSaving(false);
+      showToast(error.message);
+      return;
+    }
+    if (send && payload.customer_email) {
+      const tpl = invoiceEmail(payload.customer_name, shopName || "Our shop", payload.doc_type, docNumberFor(data), payload.line_items, subtotal, taxAmount, total, payload.due_date, payload.notes);
+      await sendEmail(payload.customer_email, tpl.subject, tpl.html);
+    }
+    setSaving(false);
+    setShowForm(false);
+    resetForm();
+    showToast(send ? `${form.doc_type} sent` : `${form.doc_type} saved as draft`);
+    refreshInvoices();
+  };
+
+  const updateStatus = async (invoice, status) => {
+    const { error } = await supabase.from("invoices").update({ status }).eq("id", invoice.id);
+    if (error) { showToast(error.message); return; }
+    showToast(`${docNumberFor(invoice)} marked ${status}`);
+    refreshInvoices();
+  };
+
+  const convertToInvoice = async (invoice) => {
+    const { error } = await supabase.from("invoices").update({ doc_type: "Invoice" }).eq("id", invoice.id);
+    if (error) { showToast(error.message); return; }
+    showToast(`${docNumberFor(invoice)} converted to an invoice`);
+    refreshInvoices();
+  };
+
+  const resend = async (invoice) => {
+    if (!invoice.customer_email) { showToast("This customer has no email on file."); return; }
+    const tpl = invoiceEmail(invoice.customer_name, shopName || "Our shop", invoice.doc_type, docNumberFor(invoice), invoice.line_items || [], Number(invoice.subtotal), Number(invoice.tax_amount), Number(invoice.total), invoice.due_date, invoice.notes);
+    await sendEmail(invoice.customer_email, tpl.subject, tpl.html);
+    showToast(`${docNumberFor(invoice)} resent`);
+  };
+
+  return <div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexDirection: isMobile ? "column" : "row", gap: 12 }}>
+      <div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Invoices & Quotes</h2>
+        <p style={{ color: COLORS.gray500, marginTop: 4 }}>Create and email invoices or quotes for tire and service work.</p>
+      </div>
+      <button onClick={openNew} style={S.btn("primary")}>+ New Invoice/Quote</button>
+    </div>
+    {showForm && <div style={{ ...S.card, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16, marginBottom: 16 }}>
+        <div>
+          <label style={S.label}>Type</label>
+          <select style={{ ...S.select, width: "100%" }} value={form.doc_type} onChange={e => setForm(f => ({ ...f, doc_type: e.target.value }))}>
+            <option>Invoice</option>
+            <option>Quote</option>
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>Create From Order (optional)</label>
+          <select style={{ ...S.select, width: "100%" }} value={form.order_id} onChange={e => selectOrderForInvoice(e.target.value)}>
+            <option value="">— None —</option>
+            {(orders || []).map(o => <option key={o.id} value={o.id}>{o.orderLabel || o.id} · {o.customer}</option>)}
+          </select>
+        </div>
+        <div><label style={S.label}>Customer Name</label><input style={S.input} value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} /></div>
+        <div><label style={S.label}>Customer Email</label><input style={S.input} value={form.customer_email} onChange={e => setForm(f => ({ ...f, customer_email: e.target.value }))} /></div>
+        <div><label style={S.label}>Customer Phone</label><input style={S.input} value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} /></div>
+        <div><label style={S.label}>Due Date</label><input type="date" style={S.input} value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} /></div>
+      </div>
+      <label style={S.label}>Line Items</label>
+      <div style={{ marginBottom: 12 }}>
+        {lineItems.map((li, i) => <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+          <input style={{ ...S.input, flex: 3 }} placeholder="Description" value={li.description} onChange={e => updateLineItem(i, "description", e.target.value)} />
+          <input type="number" min={0} style={{ ...S.input, flex: 1 }} placeholder="Qty" value={li.quantity} onChange={e => updateLineItem(i, "quantity", e.target.value)} />
+          <input type="number" min={0} step="0.01" style={{ ...S.input, flex: 1 }} placeholder="Unit Price" value={li.unit_price} onChange={e => updateLineItem(i, "unit_price", e.target.value)} />
+          <div style={{ flex: 1, textAlign: "right", fontWeight: 600, fontSize: 14 }}>${((Number(li.quantity) || 0) * (Number(li.unit_price) || 0)).toFixed(2)}</div>
+          <button onClick={() => removeLineItem(i)} style={{ ...S.btn("ghost", "sm") }}>✕</button>
+        </div>)}
+        <button onClick={addLineItem} style={{ ...S.btn("secondary", "sm") }}>+ Add Line Item</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16, marginBottom: 16 }}>
+        <div><label style={S.label}>Tax Rate (%)</label><input type="number" min={0} step="0.01" style={S.input} value={form.tax_rate} onChange={e => setForm(f => ({ ...f, tax_rate: e.target.value }))} /></div>
+        <div><label style={S.label}>Notes</label><input style={S.input} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
+      </div>
+      <div style={{ textAlign: "right", marginBottom: 16, fontSize: 14, color: COLORS.gray700 }}>
+        Subtotal: ${subtotal.toFixed(2)} &nbsp;·&nbsp; Tax: ${taxAmount.toFixed(2)} &nbsp;·&nbsp; <strong style={{ fontSize: 16 }}>Total: ${total.toFixed(2)}</strong>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button disabled={saving} onClick={() => saveInvoice(true)} style={{ ...S.btn("primary"), opacity: saving ? 0.7 : 1 }}>{saving ? "Sending…" : "Save & Send"}</button>
+        <button disabled={saving} onClick={() => saveInvoice(false)} style={S.btn("secondary")}>Save Draft</button>
+        <button onClick={() => { setShowForm(false); resetForm(); }} style={S.btn("ghost")}>Cancel</button>
+      </div>
+    </div>}
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{["#","Customer","Type","Total","Status","Date","Actions"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <tbody>
+          {loading ? <tr><td style={S.td} colSpan={7}><span style={{ color: COLORS.gray400 }}>Loading…</span></td></tr>
+          : invoices.length === 0 ? <tr><td style={S.td} colSpan={7}><span style={{ color: COLORS.gray400 }}>No invoices or quotes yet.</span></td></tr>
+          : invoices.map(inv => <tr key={inv.id}>
+            <td style={{ ...S.td, fontWeight: 700, color: COLORS.blue }}>{docNumberFor(inv)}</td>
+            <td style={S.td}>{inv.customer_name}</td>
+            <td style={S.td}>{inv.doc_type}</td>
+            <td style={{ ...S.td, fontWeight: 700 }}>${Number(inv.total).toFixed(2)}</td>
+            <td style={S.td}><span style={S.badge(inv.status)}>{inv.status}</span></td>
+            <td style={S.td}>{inv.created_at ? inv.created_at.slice(0, 10) : ""}</td>
+            <td style={S.td}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {inv.status !== "Paid" && inv.status !== "Void" && <button onClick={() => resend(inv)} style={{ ...S.btn("ghost", "sm") }}>Resend</button>}
+                {inv.doc_type === "Quote" && inv.status !== "Void" && <button onClick={() => convertToInvoice(inv)} style={{ ...S.btn("secondary", "sm") }}>Convert</button>}
+                {inv.doc_type === "Invoice" && inv.status !== "Paid" && inv.status !== "Void" && <button onClick={() => updateStatus(inv, "Paid")} style={{ ...S.btn("primary", "sm") }}>Mark Paid</button>}
+                {inv.status !== "Void" && <button onClick={() => updateStatus(inv, "Void")} style={{ ...S.btn("danger", "sm") }}>Void</button>}
+              </div>
+            </td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+const PAYMENT_METHODS = ["Cash", "Card", "Check", "Other"];
+
+function POSPage({ shopId, shopName, tires, setTires, showToast }) {
+  const isMobile = useWindowWidth() < 768;
+  const [search, setSearch] = useState("");
+  const [cart, setCart] = useState([]);
+  // POS needs to search inventory even if the Inventory tab was never
+  // visited this session (ShopDashboard only fetches tires lazily, on
+  // InventoryPage mount). Fall back to fetching directly when empty.
+  const [localTires, setLocalTires] = useState(tires || []);
+  useEffect(() => {
+    if (tires && tires.length > 0) { setLocalTires(tires); return; }
+    if (!shopId) return;
+    let cancelled = false;
+    supabase.from("tires").select("*").eq("shop_id", shopId).then(({ data, error }) => {
+      if (cancelled || error) return;
+      setLocalTires((data || []).map(tireFromSupabaseRow));
+    });
+    return () => { cancelled = true; };
+  }, [shopId, tires]);
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [taxRate, setTaxRate] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [recentSales, setRecentSales] = useState([]);
+  const [recentLoading, setRecentLoading] = useState(true);
+
+  const refreshRecentSales = useCallback(async () => {
+    if (!shopId) return;
+    setRecentLoading(true);
+    const { data, error } = await supabase.from("invoices").select("*").eq("shop_id", shopId).eq("doc_type", "Receipt").order("created_at", { ascending: false }).limit(10);
+    setRecentLoading(false);
+    if (error) { showToast(error.message); return; }
+    setRecentSales(data || []);
+  }, [shopId, showToast]);
+
+  useEffect(() => { refreshRecentSales(); }, [refreshRecentSales]);
+
+  const searchResults = search.trim().length === 0 ? [] : localTires.filter(t => `${t.brand} ${t.model} ${t.size}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 8);
+
+  const addTireToCart = (tire) => {
+    setCart(items => {
+      const existing = items.find(i => i.tire_id === tire.id);
+      if (existing) return items.map(i => i.tire_id === tire.id ? { ...i, quantity: i.quantity + 1 } : i);
+      return [...items, { tire_id: tire.id, description: `${tire.brand} ${tire.model} ${tire.size}`, quantity: 1, unit_price: Number(tire.price) || 0 }];
+    });
+    setSearch("");
+  };
+
+  const addCustomItem = () => setCart(items => [...items, { tire_id: null, description: "", quantity: 1, unit_price: 0 }]);
+  const updateCartItem = (index, field, value) => setCart(items => items.map((it, i) => i === index ? { ...it, [field]: value } : it));
+  const removeCartItem = (index) => setCart(items => items.filter((_, i) => i !== index));
+
+  const { subtotal, taxAmount, total } = computeInvoiceTotals(cart, taxRate);
+
+  const resetSale = () => {
+    setCart([]);
+    setCustomerName("");
+    setCustomerEmail("");
+    setCustomerPhone("");
+    setPaymentMethod("Cash");
+    setTaxRate(0);
+  };
+
+  const completeSale = async () => {
+    const validItems = cart.filter(i => i.description.trim());
+    if (validItems.length === 0) { showToast("Add at least one item to the cart."); return; }
+    setSaving(true);
+
+    // Deduct sold tire stock. Reads current quantity fresh from the DB rather
+    // than trusting local state, since it may be stale if Inventory wasn't
+    // just visited.
+    const tireItems = validItems.filter(i => i.tire_id);
+    for (const item of tireItems) {
+      const { data: tireRow, error: tireErr } = await supabase.from("tires").select("quantity").eq("id", item.tire_id).maybeSingle();
+      if (tireErr || !tireRow) continue;
+      const newQty = Math.max(0, Number(tireRow.quantity) - Number(item.quantity));
+      await supabase.from("tires").update({ quantity: newQty }).eq("id", item.tire_id);
+      setTires?.(ts => ts.map(t => t.id === item.tire_id ? { ...t, qty: newQty } : t));
+    }
+
+    const payload = {
+      shop_id: shopId,
+      doc_type: "Receipt",
+      status: "Paid",
+      payment_method: paymentMethod,
+      customer_name: customerName.trim() || "Walk-in Customer",
+      customer_email: customerEmail.trim() || null,
+      customer_phone: customerPhone.trim() || null,
+      line_items: validItems,
+      subtotal,
+      tax_rate: Number(taxRate) || 0,
+      tax_amount: taxAmount,
+      total,
+    };
+    const { data, error } = await supabase.from("invoices").insert(payload).select().maybeSingle();
+    setSaving(false);
+    if (error) { showToast(error.message); return; }
+
+    if (payload.customer_email) {
+      const tpl = invoiceEmail(payload.customer_name, shopName || "Our shop", "Receipt", docNumberFor(data), validItems, subtotal, taxAmount, total, null, null);
+      await sendEmail(payload.customer_email, tpl.subject, tpl.html);
+    }
+
+    showToast(`Sale complete — $${total.toFixed(2)}`);
+    resetSale();
+    refreshRecentSales();
+  };
+
+  return <div>
+    <div style={{ marginBottom: 20 }}>
+      <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Checkout</h2>
+      <p style={{ color: COLORS.gray500, marginTop: 4 }}>Ring up an in-person sale. Payment is still collected by you (cash, card reader, etc.) — this records the transaction and updates inventory.</p>
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: gridCols("1.3fr 1fr", isMobile), gap: 20 }}>
+      <div style={S.card}>
+        <label style={S.label}>Search Inventory</label>
+        <input style={{ ...S.input, marginBottom: 8 }} placeholder="Search by brand, model, or size…" value={search} onChange={e => setSearch(e.target.value)} />
+        {searchResults.length > 0 && <div style={{ border: `1px solid ${COLORS.gray200}`, borderRadius: 8, marginBottom: 16, overflow: "hidden" }}>
+          {searchResults.map(t => <div key={t.id} onClick={() => addTireToCart(t)} style={{ padding: "8px 12px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.gray100}` }}>
+            <span>{t.brand} {t.model} {t.size} <span style={{ color: COLORS.gray400 }}>({t.qty} in stock)</span></span>
+            <span style={{ fontWeight: 700 }}>${Number(t.price).toFixed(2)}</span>
+          </div>)}
+        </div>}
+
+        <label style={S.label}>Cart</label>
+        {cart.length === 0 && <div style={{ color: COLORS.gray400, marginBottom: 12 }}>Search inventory above or add a custom item.</div>}
+        {cart.map((item, i) => <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+          <input style={{ ...S.input, flex: 3 }} placeholder="Description" value={item.description} onChange={e => updateCartItem(i, "description", e.target.value)} disabled={!!item.tire_id} />
+          <input type="number" min={0} style={{ ...S.input, flex: 1 }} value={item.quantity} onChange={e => updateCartItem(i, "quantity", e.target.value)} />
+          <input type="number" min={0} step="0.01" style={{ ...S.input, flex: 1 }} value={item.unit_price} onChange={e => updateCartItem(i, "unit_price", e.target.value)} />
+          <div style={{ flex: 1, textAlign: "right", fontWeight: 600, fontSize: 14 }}>${((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toFixed(2)}</div>
+          <button onClick={() => removeCartItem(i)} style={{ ...S.btn("ghost", "sm") }}>✕</button>
+        </div>)}
+        <button onClick={addCustomItem} style={{ ...S.btn("secondary", "sm") }}>+ Add Custom Item (fee, service, etc.)</button>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>Customer & Payment</div>
+        <label style={S.label}>Customer Name (optional)</label>
+        <input style={{ ...S.input, marginBottom: 10 }} value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Walk-in Customer" />
+        <label style={S.label}>Email (for receipt)</label>
+        <input style={{ ...S.input, marginBottom: 10 }} value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} />
+        <label style={S.label}>Phone</label>
+        <input style={{ ...S.input, marginBottom: 10 }} value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
+        <label style={S.label}>Payment Method</label>
+        <select style={{ ...S.select, width: "100%", marginBottom: 10 }} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+          {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
+        </select>
+        <label style={S.label}>Tax Rate (%)</label>
+        <input type="number" min={0} step="0.01" style={{ ...S.input, marginBottom: 14 }} value={taxRate} onChange={e => setTaxRate(e.target.value)} />
+        <div style={{ borderTop: `1px solid ${COLORS.gray200}`, paddingTop: 12, marginBottom: 14, fontSize: 14 }}>
+          <div>Subtotal: ${subtotal.toFixed(2)}</div>
+          <div>Tax: ${taxAmount.toFixed(2)}</div>
+          <div style={{ fontWeight: 800, fontSize: 18, marginTop: 4 }}>Total: ${total.toFixed(2)}</div>
+        </div>
+        <button disabled={saving} onClick={completeSale} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", opacity: saving ? 0.7 : 1 }}>{saving ? "Processing…" : "Complete Sale"}</button>
+      </div>
+    </div>
+
+    <div style={{ ...S.card, marginTop: 20 }}>
+      <div style={{ fontWeight: 700, marginBottom: 14 }}>Recent Sales</div>
+      {recentLoading && <div style={{ color: COLORS.gray500 }}>Loading…</div>}
+      {!recentLoading && recentSales.length === 0 && <div style={{ color: COLORS.gray400 }}>No sales yet.</div>}
+      {!recentLoading && recentSales.length > 0 && <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{["Customer","Total","Payment","Date"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <tbody>{recentSales.map(s => <tr key={s.id}>
+          <td style={S.td}>{s.customer_name}</td>
+          <td style={{ ...S.td, fontWeight: 700 }}>${Number(s.total).toFixed(2)}</td>
+          <td style={S.td}>{s.payment_method}</td>
+          <td style={S.td}>{s.created_at ? s.created_at.slice(0, 10) : ""}</td>
+        </tr>)}</tbody>
+      </table>}
+    </div>
+  </div>;
+}
+
 function AnalyticsPage({ shopId, showToast }) {
   const isMobile = useWindowWidth() < 768;
   const [loading, setLoading] = useState(true);
@@ -2804,20 +3383,89 @@ function AnalyticsPage({ shopId, showToast }) {
   </div>;
 }
 
-function StaffPage({ showToast }) {
-  const staff = [
-    { name: "Marcus Williams", role: "Owner", email: "marcus@greenvilletire.com", status: "Active" },
-    { name: "Deja Lawson", role: "Manager", email: "deja@greenvilletire.com", status: "Active" },
-    { name: "Trevor Banks", role: "Inventory Staff", email: "trevor@greenvilletire.com", status: "Active" },
-  ];
-  const roles = { Owner: "Full access", Manager: "Inventory, orders, appointments, customers", "Inventory Staff": "Inventory only", "Order Staff": "Orders and appointments only" };
+const STAFF_ROLE_DESCRIPTIONS = { Owner: "Full access", Manager: "Inventory, orders, appointments, customers", "Inventory Staff": "Inventory only", "Order Staff": "Orders and appointments only" };
+
+function StaffPage({ shopId, shopName, showToast }) {
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", role: "Inventory Staff" });
+  const [inviting, setInviting] = useState(false);
+
+  const refreshStaff = useCallback(async () => {
+    if (!shopId) return;
+    setLoading(true);
+    const { data, error } = await supabase.from("shop_staff").select("*").eq("shop_id", shopId).order("invited_at", { ascending: true });
+    setLoading(false);
+    if (error) { showToast(error.message); return; }
+    setStaff(data || []);
+  }, [shopId, showToast]);
+
+  useEffect(() => { refreshStaff(); }, [refreshStaff]);
+
+  const inviteStaff = async () => {
+    if (!form.name.trim() || !form.email.trim()) {
+      showToast("Name and email are required.");
+      return;
+    }
+    setInviting(true);
+    const code = genInviteCode("ST");
+    const { error } = await supabase.from("shop_staff").insert({
+      shop_id: shopId,
+      name: form.name.trim(),
+      email: form.email.trim(),
+      role: form.role,
+      status: "Invited",
+      invite_code: code,
+    });
+    if (error) {
+      setInviting(false);
+      showToast(error.message);
+      return;
+    }
+    const acceptUrl = `${window.location.origin}/staff-invite?code=${code}`;
+    const tpl = staffInviteEmail(form.name.trim(), shopName || "your shop", form.role, code, acceptUrl);
+    await sendEmail(form.email.trim(), tpl.subject, tpl.html);
+    setInviting(false);
+    setShowForm(false);
+    setForm({ name: "", email: "", role: "Inventory Staff" });
+    showToast("Invite sent!");
+    refreshStaff();
+  };
+
+  const revokeStaff = async (member) => {
+    const { error } = await supabase.from("shop_staff").update({ status: "Removed" }).eq("id", member.id);
+    if (error) { showToast(error.message); return; }
+    showToast(`${member.name} removed`);
+    refreshStaff();
+  };
+
   return <div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Staff</h2>
-      <button onClick={() => showToast("Invite sent!")} style={S.btn("primary")}>+ Invite Staff</button>
+      <button onClick={() => setShowForm(v => !v)} style={S.btn("primary")}>+ Invite Staff</button>
     </div>
+    {showForm && <div style={{ ...S.card, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div>
+          <label style={S.label}>Name</label>
+          <input style={S.input} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        </div>
+        <div>
+          <label style={S.label}>Email</label>
+          <input style={S.input} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+        </div>
+      </div>
+      <label style={S.label}>Role</label>
+      <select style={{ ...S.select, width: "100%", marginBottom: 14 }} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+        {["Manager", "Inventory Staff", "Order Staff"].map(r => <option key={r}>{r}</option>)}
+      </select>
+      <button disabled={inviting} onClick={inviteStaff} style={{ ...S.btn("primary"), opacity: inviting ? 0.7 : 1 }}>{inviting ? "Sending…" : "Send Invite"}</button>
+    </div>}
     <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-      {staff.map(s => <div key={s.name} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      {loading && <div style={{ color: COLORS.gray500 }}>Loading staff…</div>}
+      {!loading && staff.length === 0 && <div style={{ color: COLORS.gray400 }}>No staff yet.</div>}
+      {staff.map(s => <div key={s.id} style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
           <div style={{ width: 40, height: 40, borderRadius: "50%", background: COLORS.blue, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 16 }}>{s.name[0]}</div>
           <div>
@@ -2825,17 +3473,115 @@ function StaffPage({ showToast }) {
             <div style={{ fontSize: 13, color: COLORS.gray500 }}>{s.email}</div>
           </div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <span style={{ fontWeight: 700, fontSize: 14, color: s.role === "Owner" ? COLORS.orange : COLORS.blue }}>{s.role}</span>
-          <div style={{ fontSize: 12, color: COLORS.gray400 }}>{roles[s.role]}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ textAlign: "right" }}>
+            <span style={{ fontWeight: 700, fontSize: 14, color: COLORS.blue }}>{s.role}</span>
+            <div style={{ fontSize: 12, color: COLORS.gray400 }}>{STAFF_ROLE_DESCRIPTIONS[s.role] || ""}</div>
+          </div>
+          <span style={S.badge(s.status)}>{s.status}</span>
+          {s.status !== "Removed" && <button onClick={() => revokeStaff(s)} style={{ ...S.btn("danger", "sm") }}>Remove</button>}
         </div>
       </div>)}
     </div>
   </div>;
 }
 
+function LocationsPage({ shops, setShops, activeShop, setActiveShop, showToast }) {
+  const isMobile = useWindowWidth() < 768;
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: "", city: "", state: "", phone: "", email: "" });
+  const [saving, setSaving] = useState(false);
+
+  const myLocations = (shops || []).filter(s => (s.staffRole || "Owner") === "Owner");
+  const canAddLocation = activeShop?.plan === "Market Leader";
+
+  const addLocation = async () => {
+    if (!form.name.trim() || !form.city.trim() || !form.state.trim()) {
+      showToast("Location name, city, and state are required.");
+      return;
+    }
+    setSaving(true);
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      setSaving(false);
+      showToast("Unable to verify your account. Please log in again.");
+      return;
+    }
+
+    // Find a slug that doesn't collide with an existing shop.
+    const base = slugifyLocationName(form.name);
+    let slug = base;
+    for (let i = 0; i < 5; i++) {
+      const { data: existing } = await supabase.from("shops").select("id").eq("slug", slug).maybeSingle();
+      if (!existing) break;
+      slug = `${base}-${Math.random().toString(36).substring(2, 6)}`;
+    }
+
+    const payload = {
+      user_id: user.id,
+      name: form.name.trim(),
+      city: form.city.trim(),
+      state: form.state.trim(),
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || activeShop?.email || user.email,
+      slug,
+      plan: activeShop?.plan || "Market Leader",
+      status: "Active",
+      owner_name: activeShop?.owner_name || null,
+    };
+    const { data, error } = await supabase.from("shops").insert(payload).select().maybeSingle();
+    setSaving(false);
+    if (error) { showToast(error.message); return; }
+    setShops(s => [...s, { ...data, staffRole: "Owner" }]);
+    setShowForm(false);
+    setForm({ name: "", city: "", state: "", phone: "", email: "" });
+    showToast(`${data.name} added`);
+  };
+
+  return <div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexDirection: isMobile ? "column" : "row", gap: 12 }}>
+      <div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Locations</h2>
+        <p style={{ color: COLORS.gray500, marginTop: 4 }}>Manage the locations under your account. Switch between them from the sidebar.</p>
+      </div>
+      {canAddLocation ? (
+        <button onClick={() => setShowForm(v => !v)} style={S.btn("primary")}>+ Add Location</button>
+      ) : (
+        <span style={{ fontSize: 13, color: COLORS.gray500, maxWidth: 260, textAlign: isMobile ? "left" : "right" }}>Multi-location is included on the Market Leader plan.</span>
+      )}
+    </div>
+
+    {showForm && canAddLocation && <div style={{ ...S.card, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 16, marginBottom: 16 }}>
+        <div><label style={S.label}>Location Name</label><input style={S.input} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+        <div><label style={S.label}>City</label><input style={S.input} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
+        <div><label style={S.label}>State</label><input style={S.input} value={form.state} onChange={e => setForm(f => ({ ...f, state: e.target.value }))} /></div>
+        <div><label style={S.label}>Phone</label><input style={S.input} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+        <div style={{ gridColumn: isMobile ? "auto" : "1/-1" }}><label style={S.label}>Contact Email</label><input style={S.input} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder={activeShop?.email || ""} /></div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button disabled={saving} onClick={addLocation} style={{ ...S.btn("primary"), opacity: saving ? 0.7 : 1 }}>{saving ? "Adding…" : "Add Location"}</button>
+        <button onClick={() => setShowForm(false)} style={S.btn("secondary")}>Cancel</button>
+      </div>
+    </div>}
+
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E2E8F0", overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{["Location","City","State","Plan","Status","Actions"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <tbody>{myLocations.length === 0 ? <tr><td style={S.td} colSpan={6}><span style={{ color: COLORS.gray400 }}>No locations found.</span></td></tr> : myLocations.map(s => <tr key={s.id}>
+          <td style={S.td}><div style={{ fontWeight: 600 }}>{s.name}</div></td>
+          <td style={S.td}>{s.city}</td>
+          <td style={S.td}>{s.state}</td>
+          <td style={S.td}>{s.plan}</td>
+          <td style={S.td}><span style={S.badge(s.status)}>{s.status}</span></td>
+          <td style={S.td}>{s.id === activeShop?.id ? <span style={{ color: COLORS.gray400, fontSize: 13 }}>Current</span> : <button onClick={() => setActiveShop(s)} style={{ ...S.btn("ghost", "sm") }}>Switch to this location</button>}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
 function ShopSettings({ shopId, showToast }) {
-  console.log('ShopSettings shopId prop:', shopId);
   const isMobile = useWindowWidth() < 768;
   const galleryInputRef = useRef(null);
   const [mobileServiceEnabled, setMobileServiceEnabled] = useState(false);
@@ -2851,6 +3597,8 @@ function ShopSettings({ shopId, showToast }) {
   const [galleryStorageMissing, setGalleryStorageMissing] = useState(false);
   const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, chatbot: true, announcement: true });
   const [savingStorefrontSections, setSavingStorefrontSections] = useState(false);
+  const [googleReviewUrl, setGoogleReviewUrl] = useState("");
+  const [savingGoogleReviewUrl, setSavingGoogleReviewUrl] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -2858,7 +3606,7 @@ function ShopSettings({ shopId, showToast }) {
     (async () => {
       const { data, error } = await supabase
         .from("shops")
-        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections, google_review_url")
         .eq("id", shopId)
         .maybeSingle();
       if (cancelled) return;
@@ -2877,12 +3625,28 @@ function ShopSettings({ shopId, showToast }) {
       if (data.storefront_sections && typeof data.storefront_sections === "object") {
         setStorefrontSections(prev => ({ ...prev, ...data.storefront_sections }));
       }
+      setGoogleReviewUrl(data.google_review_url || "");
     })();
     return () => { cancelled = true; };
   }, [shopId, showToast]);
 
+  const saveGoogleReviewUrl = async () => {
+    if (!shopId) return;
+    setSavingGoogleReviewUrl(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({ google_review_url: googleReviewUrl.trim() || null })
+      .eq("id", shopId);
+    setSavingGoogleReviewUrl(false);
+    if (error) {
+      showToast(error.message || "Unable to save Google review link.");
+      return;
+    }
+    setGoogleReviewUrl(googleReviewUrl.trim());
+    showToast("Google review link saved.");
+  };
+
   const saveMobileSettings = async () => {
-    console.log('saving mobile settings, shopId:', shopId, 'enabled:', mobileServiceEnabled);
     if (!shopId) return;
     setSavingMobileService(true);
     const { error } = await supabase
@@ -3075,6 +3839,20 @@ function ShopSettings({ shopId, showToast }) {
             <source src={heroVideoUrl.trim()} type={heroVideoUrl.trim().toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4"} />
           </video>
         )}
+      </div>
+      <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Google Review Link</div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={S.label}>Google Review URL</label>
+          <input
+            style={S.input}
+            value={googleReviewUrl}
+            onChange={e => setGoogleReviewUrl(e.target.value)}
+            placeholder="https://g.page/r/your-shop/review"
+          />
+        </div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, lineHeight: 1.5, marginBottom: 14 }}>Customers get this link in a follow-up email after their order is marked Completed. Find your shop's review link in Google Business Profile.</div>
+        <button onClick={saveGoogleReviewUrl} disabled={savingGoogleReviewUrl} style={S.btn("primary")}>{savingGoogleReviewUrl ? "Saving..." : "Save Review Link"}</button>
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Business Hours</div>
@@ -3276,20 +4054,6 @@ function ShopBilling({ shopId, plan, status }) {
   </div>;
 }
 
-function parseVehicleFields(vehicleRaw) {
-  const parts = vehicleRaw.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { vehicle_year: null, vehicle_make: "", vehicle_model: "" };
-  let idx = 0;
-  let vehicle_year = null;
-  if (/^\d{4}$/.test(parts[0])) {
-    vehicle_year = parseInt(parts[0], 10);
-    idx = 1;
-  }
-  const vehicle_make = parts[idx] ?? "";
-  const vehicle_model = parts.slice(idx + 1).join(" ");
-  return { vehicle_year, vehicle_make, vehicle_model };
-}
-
 function parseTimeString(time) {
   const match = String(time || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!match) return null;
@@ -3334,7 +4098,7 @@ function buildMobileTimeSlots(startTime, endTime) {
 // -- alter table waitlist: id uuid, shop_id uuid, tire_id uuid, tire_name text, email text, created_at timestamptz
 // -- create table storefront_views (id uuid default gen_random_uuid() primary key, shop_id uuid, page text, tire_id uuid, created_at timestamptz default now());
 
-async function storefrontSubmitReservation(shopId, {
+export async function storefrontSubmitReservation(shopId, {
   orderTire,
   name,
   phone,
@@ -3686,18 +4450,12 @@ function Storefront({ nav, initialTireSlug }) {
   };
 
   const submitWaitlist = async () => {
-    if (!waitlistTire || !waitlistEmail.trim()) return;
+    const { valid, payload } = buildWaitlistPayload(waitlistTire, waitlistEmail, publicShopId);
+    if (!valid) return;
     setWaitlistSubmitting(true);
-    const tireName = `${waitlistTire.brand} ${waitlistTire.model} ${waitlistTire.size}`;
     try {
       // Public storefront users need insert permission on waitlist via Supabase RLS policy.
-      const { error } = await supabase.from("waitlist").insert({
-        shop_id: publicShopId,
-        tire_id: waitlistTire.id,
-        tire_name: tireName,
-        email: waitlistEmail.trim(),
-        created_at: new Date().toISOString(),
-      });
+      const { error } = await supabase.from("waitlist").insert(payload);
       if (error) throw error;
       setWaitlistSuccess("We will email you when this tire is back in stock!");
     } catch (error) {
@@ -4335,15 +5093,77 @@ function Storefront({ nav, initialTireSlug }) {
 }
 
 // ── INVITE ONBOARDING ─────────────────────────────────────────────────────
-function InviteOnboarding({ nav }) {
+function InviteOnboarding({ nav, initialCode }) {
   const [step, setStep] = useState(1);
-  const code = "TF-SC-KX92PL";
+  const [code, setCode] = useState(initialCode || "");
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState(null);
+  const [invite, setInvite] = useState(null);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
+
+  const verifyCode = async () => {
+    if (!code.trim()) { setCheckError("Invite code is required."); return; }
+    setChecking(true);
+    setCheckError(null);
+    const { data, error } = await supabase.rpc("validate_staff_invite", { p_code: code.trim() });
+    setChecking(false);
+    if (error) { setCheckError(error.message); return; }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) { setCheckError("This invite code is invalid or has already been used."); return; }
+    setInvite(row);
+    setStep(2);
+  };
+
+  const createAccount = async () => {
+    if (password.length < 6) { setCreateError("Password must be at least 6 characters."); return; }
+    if (password !== confirm) { setCreateError("Passwords do not match."); return; }
+    setCreating(true);
+    setCreateError(null);
+    const { data, error } = await supabase.auth.signUp({
+      email: invite.email,
+      password,
+      options: { data: { staff_invite_code: code.trim() } },
+    });
+    if (error) {
+      setCreating(false);
+      setCreateError(error.message);
+      return;
+    }
+    if (data?.session) {
+      const { error: acceptErr } = await supabase.rpc("accept_staff_invite", { p_code: code.trim() });
+      if (acceptErr) {
+        setCreating(false);
+        setCreateError(acceptErr.message);
+        return;
+      }
+      setCreating(false);
+      setStep(3);
+    } else {
+      setCreating(false);
+      setStep("confirm-email");
+    }
+  };
+
+  if (step === "confirm-email") return (
+    <div style={{ minHeight: "100vh", background: COLORS.navy, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "60px 48px", textAlign: "center", maxWidth: 500 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>📬</div>
+        <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 12 }}>Check your email</h2>
+        <p style={{ color: COLORS.gray500, marginBottom: 28, lineHeight: 1.7 }}>Confirm your email address, then log in — your access to <strong>{invite?.shop_name}</strong> will be linked automatically.</p>
+        <button onClick={() => nav("login")} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Go to Login →</button>
+      </div>
+    </div>
+  );
+
   if (step === 3) return (
     <div style={{ minHeight: "100vh", background: COLORS.navy, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: "60px 48px", textAlign: "center", maxWidth: 500 }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🚀</div>
         <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 12 }}>You're in. Welcome to TreadFlow!</h2>
-        <p style={{ color: COLORS.gray500, marginBottom: 28, lineHeight: 1.7 }}>Your shop account has been created. Your storefront is being set up. You'll receive a confirmation email with next steps from your onboarding specialist.</p>
+        <p style={{ color: COLORS.gray500, marginBottom: 28, lineHeight: 1.7 }}>Your staff account for <strong>{invite?.shop_name}</strong> is ready.</p>
         <button onClick={() => nav("shop")} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Go to Shop Dashboard →</button>
       </div>
     </div>
@@ -4351,30 +5171,35 @@ function InviteOnboarding({ nav }) {
   return (
     <div style={{ minHeight: "100vh", background: COLORS.navy, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: "48px 44px", maxWidth: 520, width: "100%" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.orange, marginBottom: 8 }}>PRIVATE INVITE — TREADFLOW</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.orange, marginBottom: 8 }}>STAFF INVITE — TREADFLOW</div>
         <h2 style={{ fontSize: 26, fontWeight: 800, marginBottom: 4 }}>{step === 1 ? "Verify Your Invite" : "Create Your Account"}</h2>
         <p style={{ color: COLORS.gray500, fontSize: 14, marginBottom: 24 }}>{step === 1 ? "Enter your invite code to get started." : "You're approved. Set up your account below."}</p>
         {step === 1 && <>
           <label style={S.label}>Invite Code</label>
-          <input style={{ ...S.input, fontFamily: "monospace", fontSize: 18, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }} defaultValue={code} />
-          <label style={S.label}>Email Address</label>
-          <input style={{ ...S.input, marginBottom: 20 }} defaultValue="marcus@greenvilletire.com" />
-          <div style={{ background: "#F0FDF4", borderRadius: 10, padding: "12px 14px", marginBottom: 20, fontSize: 13, color: "#166534" }}>
-            ✓ Invite valid · Plan: Growth Partner · Market: Greenville, SC · Expires May 16, 2026
-          </div>
-          <button onClick={() => setStep(2)} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Verify & Continue →</button>
+          <input style={{ ...S.input, fontFamily: "monospace", fontSize: 18, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }} value={code} onChange={e => setCode(e.target.value)} />
+          {checkError && <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginBottom: 16 }}>{checkError}</div>}
+          <button disabled={checking} onClick={verifyCode} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", opacity: checking ? 0.7 : 1 }}>{checking ? "Verifying…" : "Verify & Continue →"}</button>
         </>}
-        {step === 2 && <>
+        {step === 2 && invite && <>
+          <div style={{ background: "#F0FDF4", borderRadius: 10, padding: "12px 14px", marginBottom: 20, fontSize: 13, color: "#166534" }}>
+            ✓ Invite valid · {invite.name} · {invite.role} at {invite.shop_name}
+          </div>
           <div style={{ display: "grid", gap: 12 }}>
-            {[["Full Name","Marcus Williams"],["Shop Name","Greenville Tire Pros"],["Password",""],["Confirm Password",""]].map(([l, v]) => <div key={l}>
-              <label style={S.label}>{l}</label>
-              <input type={l.includes("Password") ? "password" : "text"} style={S.input} defaultValue={v} />
-            </div>)}
+            <div>
+              <label style={S.label}>Email</label>
+              <input style={S.input} value={invite.email} disabled />
+            </div>
+            <div>
+              <label style={S.label}>Password</label>
+              <input type="password" style={S.input} value={password} onChange={e => setPassword(e.target.value)} />
+            </div>
+            <div>
+              <label style={S.label}>Confirm Password</label>
+              <input type="password" style={S.input} value={confirm} onChange={e => setConfirm(e.target.value)} />
+            </div>
           </div>
-          <div style={{ background: COLORS.gray50, borderRadius: 10, padding: "12px 14px", marginTop: 16, marginBottom: 20, fontSize: 13, color: COLORS.gray600 }}>
-            Assigned Plan: <strong>Growth Partner — $249/mo</strong><br />Market: <strong>Greenville, SC</strong>
-          </div>
-          <button onClick={() => setStep(3)} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Create Account & Start →</button>
+          {createError && <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginTop: 16 }}>{createError}</div>}
+          <button disabled={creating} onClick={createAccount} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", marginTop: 20, opacity: creating ? 0.7 : 1 }}>{creating ? "Creating…" : "Create Account & Start →"}</button>
         </>}
       </div>
     </div>
@@ -4438,10 +5263,14 @@ function LoginPage({ nav }) {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
+    if (!error && data?.user?.user_metadata?.staff_invite_code) {
+      const { error: acceptErr } = await supabase.rpc("accept_staff_invite", { p_code: data.user.user_metadata.staff_invite_code });
+      if (acceptErr) console.warn("accept_staff_invite:", acceptErr.message);
+    }
     setLoading(false);
     if (error) setError(error.message);
   };
@@ -4471,7 +5300,13 @@ function LoginPage({ nav }) {
         </button>
       </form>
 
-      <p style={{ textAlign: "center", margin: "18px 0 0", fontSize: 14, color: COLORS.gray600 }}>
+      <p style={{ textAlign: "center", margin: "14px 0 0", fontSize: 14, color: COLORS.gray600 }}>
+        <button type="button" onClick={() => nav("forgot-password")} style={linkStyle}>
+          Forgot your password?
+        </button>
+      </p>
+
+      <p style={{ textAlign: "center", margin: "10px 0 0", fontSize: 14, color: COLORS.gray600 }}>
         Need an account?{" "}
         <button type="button" onClick={() => nav("signup")} style={linkStyle}>
           Sign up with an invite code
@@ -4483,6 +5318,122 @@ function LoginPage({ nav }) {
           ← Back to public site
         </button>
       </div>
+    </AuthCardShell>
+  );
+}
+
+function ForgotPasswordPage({ nav }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [sent, setSent] = useState(false);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    setSent(true);
+  };
+
+  if (sent) return (
+    <AuthCardShell maxWidth={460}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.orange, letterSpacing: 1.2, marginBottom: 10, textTransform: "uppercase" }}>Check your email</div>
+      <h2 style={{ fontSize: 26, fontWeight: 800, color: COLORS.gray900, margin: "0 0 12px" }}>Reset link sent</h2>
+      <p style={{ color: COLORS.gray500, margin: "0 0 24px", fontSize: 15, lineHeight: 1.55 }}>If an account exists for <strong>{email.trim()}</strong>, we've sent a link to reset your password.</p>
+      <button type="button" onClick={() => nav("login")} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>← Back to login</button>
+    </AuthCardShell>
+  );
+
+  return (
+    <AuthCardShell maxWidth={460}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.orange, letterSpacing: 1.2, marginBottom: 10, textTransform: "uppercase" }}>Reset password</div>
+      <h2 style={{ fontSize: 26, fontWeight: 800, color: COLORS.gray900, margin: "0 0 8px" }}>Forgot your password?</h2>
+      <p style={{ color: COLORS.gray500, margin: "0 0 24px", fontSize: 15, lineHeight: 1.55 }}>Enter your email and we'll send you a link to reset it.</p>
+      <form onSubmit={onSubmit}>
+        <label style={S.label}>Email</label>
+        <input style={{ ...S.input, marginBottom: 14 }} value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
+        {error && (
+          <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginBottom: 16, lineHeight: 1.45 }}>
+            {error}
+          </div>
+        )}
+        <button type="submit" disabled={loading} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", opacity: loading ? 0.75 : 1 }}>
+          {loading ? "Sending…" : "Send reset link →"}
+        </button>
+      </form>
+      <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid ${COLORS.gray200}` }}>
+        <button type="button" onClick={() => nav("login")} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", color: COLORS.gray600, border: `1px solid ${COLORS.gray300}` }}>
+          ← Back to login
+        </button>
+      </div>
+    </AuthCardShell>
+  );
+}
+
+function ResetPasswordPage({ nav }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) setSessionReady(!!data?.session);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (password !== confirm) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    setDone(true);
+  };
+
+  if (done) return (
+    <AuthCardShell maxWidth={460}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>✓</div>
+      <h2 style={{ fontSize: 26, fontWeight: 800, color: COLORS.gray900, margin: "0 0 12px" }}>Password updated</h2>
+      <p style={{ color: COLORS.gray500, margin: "0 0 24px", fontSize: 15, lineHeight: 1.55 }}>Your password has been changed. You're signed in — head to your dashboard.</p>
+      <button type="button" onClick={() => nav("shop")} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Go to Shop Dashboard →</button>
+    </AuthCardShell>
+  );
+
+  return (
+    <AuthCardShell maxWidth={460}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: COLORS.orange, letterSpacing: 1.2, marginBottom: 10, textTransform: "uppercase" }}>Reset password</div>
+      <h2 style={{ fontSize: 26, fontWeight: 800, color: COLORS.gray900, margin: "0 0 8px" }}>Choose a new password</h2>
+      {!sessionReady ? (
+        <p style={{ color: COLORS.gray500, fontSize: 15, lineHeight: 1.55 }}>This reset link is invalid or has expired. <button type="button" onClick={() => nav("forgot-password")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: COLORS.blue, fontWeight: 600, fontFamily: "inherit" }}>Request a new one</button>.</p>
+      ) : (
+        <form onSubmit={onSubmit}>
+          <label style={S.label}>New Password</label>
+          <input type="password" style={{ ...S.input, marginBottom: 12 }} value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
+          <label style={S.label}>Confirm Password</label>
+          <input type="password" style={{ ...S.input, marginBottom: 14 }} value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" />
+          {error && (
+            <div role="alert" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", borderRadius: 10, padding: "12px 14px", fontSize: 13, marginBottom: 16, lineHeight: 1.45 }}>
+              {error}
+            </div>
+          )}
+          <button type="submit" disabled={loading} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center", opacity: loading ? 0.75 : 1 }}>
+            {loading ? "Saving…" : "Update password →"}
+          </button>
+        </form>
+      )}
     </AuthCardShell>
   );
 }
@@ -4583,8 +5534,17 @@ function SignUpPage({ nav }) {
 
 export default function App() {
   const initialStorefrontMatch = typeof window !== "undefined" ? window.location.pathname.match(/^\/shop\/([^/]+)\/([^/]+)\/?$/) : null;
+  const initialStaffInviteCode = typeof window !== "undefined" && window.location.pathname === "/staff-invite" ? new URLSearchParams(window.location.search).get("code") : null;
+  // Supabase's default email confirmation link redirects back with
+  // #access_token=...&type=signup in the hash; detectSessionInUrl (supabase.js)
+  // already turns that into a real session, this just recognizes it so we can
+  // route the now-verified user straight into their dashboard instead of
+  // leaving them stranded on whatever page they landed on.
+  const initialAuthHashType = typeof window !== "undefined" ? new URLSearchParams(window.location.hash.replace(/^#/, "")).get("type") : null;
   const [page, setPage] = useState(() => {
     if (typeof window !== "undefined" && window.location.pathname === "/sms-terms") return "sms-terms";
+    if (typeof window !== "undefined" && window.location.pathname === "/reset-password") return "reset-password";
+    if (initialStaffInviteCode) return "onboarding";
     if (initialStorefrontMatch) return "storefront";
     if (typeof window !== "undefined" && window.location.search.includes("deposit_success=true")) return "storefront";
     return "home";
@@ -4593,6 +5553,8 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [intendedPage, setIntendedPage] = useState("shop");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -4614,14 +5576,45 @@ export default function App() {
     };
   }, []);
 
+  // Separate from auth: whether the signed-in user is a platform admin.
+  useEffect(() => {
+    let cancelled = false;
+    if (!authReady) return;
+    if (!session) {
+      setIsAdmin(false);
+      setAdminChecked(true);
+      return;
+    }
+    setAdminChecked(false);
+    supabase
+      .from("platform_admins")
+      .select("id")
+      .eq("id", session.user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) console.warn("platform_admins check error:", error);
+        setIsAdmin(!!data);
+        setAdminChecked(true);
+      });
+    return () => { cancelled = true; };
+  }, [authReady, session]);
+
   // If the user is on auth pages and gets a session, send them where they meant to go.
   useEffect(() => {
     if (!authReady) return;
     if (session && (page === "login" || page === "signup")) setPage(intendedPage || "shop");
   }, [authReady, intendedPage, page, session]);
 
+  // Email confirmation link landed here with a fresh session — go straight
+  // to the dashboard instead of leaving them on the public home page.
+  useEffect(() => {
+    if (!authReady || !session) return;
+    if (initialAuthHashType === "signup" && page === "home") setPage("shop");
+  }, [authReady, session, initialAuthHashType, page]);
+
   const nav = (p) => {
-    const protectedPages = new Set(["shop"]);
+    const protectedPages = new Set(["shop", "admin"]);
     if (protectedPages.has(p) && !session) {
       setIntendedPage(p);
       setPage("login");
@@ -4643,10 +5636,26 @@ export default function App() {
       {page === "home" && <LandingPage nav={nav} />}
       {page === "login" && <LoginPage nav={nav} />}
       {page === "signup" && <SignUpPage nav={nav} />}
+      {page === "forgot-password" && <ForgotPasswordPage nav={nav} />}
+      {page === "reset-password" && <ResetPasswordPage nav={nav} />}
       {page === "invite" && <InvitePage nav={nav} />}
       {page === "market" && <MarketPage nav={nav} />}
-      {page === "onboarding" && <InviteOnboarding nav={nav} />}
-      {page === "admin" && <SuperAdmin nav={nav} />}
+      {page === "onboarding" && <InviteOnboarding nav={nav} initialCode={initialStaffInviteCode} />}
+      {page === "admin" && (
+        !authReady || (session && !adminChecked) ? (
+          <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>Loading...</div>
+        ) : !session ? (
+          <LoginPage nav={nav} />
+        ) : isAdmin ? (
+          <SuperAdmin nav={nav} />
+        ) : (
+          <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Access denied</div>
+            <div style={{ color: "#64748B" }}>Your account does not have Super Admin access.</div>
+            <button onClick={() => nav("home")} style={{ ...S.btn("secondary"), marginTop: 8 }}>← Back to TreadFlow</button>
+          </div>
+        )
+      )}
       {page === "shop" && (authReady ? (session ? <ShopDashboard nav={nav} /> : <LoginPage nav={nav} />) : <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>Loading...</div>)}
       {page === "storefront" && <Storefront nav={nav} initialTireSlug={initialTireSlug} />}
       {page === "sms-terms" && <SmsTermsPage nav={nav} />}
