@@ -1401,6 +1401,9 @@ function ShopDashboard({ nav }) {
           <button type="button" onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>
             Log out
           </button>
+          <button type="button" onClick={() => nav("admin")} style={{ ...S.btn("ghost", "sm"), width: "100%", justifyContent: "center", marginTop: 12, color: COLORS.gray500, border: `1px solid ${COLORS.gray300}` }}>
+            Have platform admin access? Go to Super Admin Dashboard →
+          </button>
         </div>
       </div>
     );
@@ -5544,6 +5547,10 @@ export default function App() {
   const [page, setPage] = useState(() => {
     if (typeof window !== "undefined" && window.location.pathname === "/sms-terms") return "sms-terms";
     if (typeof window !== "undefined" && window.location.pathname === "/reset-password") return "reset-password";
+    // The old dev nav bar was the only thing that ever called nav("admin") —
+    // it's dead code, unrendered, so this was previously the only route in
+    // the whole app with no way to reach it at all. Give it a real URL.
+    if (typeof window !== "undefined" && window.location.pathname === "/admin") return "admin";
     if (initialStaffInviteCode) return "onboarding";
     if (initialStorefrontMatch) return "storefront";
     if (typeof window !== "undefined" && window.location.search.includes("deposit_success=true")) return "storefront";

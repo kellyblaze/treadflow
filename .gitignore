@@ -27,3 +27,5 @@ dist-ssr
 # Supabase CLI local cache (project ref, version pins) — not schema, not secret,
 # just noise that shouldn't be re-committed each time the CLI runs.
 supabase/.temp
+.vercel
+.env*
