@@ -5338,6 +5338,15 @@ function LoginPage({ nav }) {
       const { error: acceptErr } = await supabase.rpc("accept_staff_invite", { p_code: data.user.user_metadata.staff_invite_code });
       if (acceptErr) console.warn("accept_staff_invite:", acceptErr.message);
     }
+    // Shop-owner signups store their invite code the same way (see
+    // SignUpPage) — most real signups land here on first login rather than
+    // getting an immediate session, since email confirmation is normally
+    // required. accept_shop_invite is idempotent, so this is safe even if
+    // SignUpPage already created the shop for an auto-confirmed account.
+    if (!error && data?.user?.user_metadata?.invite_code) {
+      const { error: acceptErr } = await supabase.rpc("accept_shop_invite", { p_code: data.user.user_metadata.invite_code });
+      if (acceptErr) console.warn("accept_shop_invite:", acceptErr.message);
+    }
     setLoading(false);
     if (error) setError(error.message);
   };
@@ -5540,15 +5549,25 @@ function SignUpPage({ nav }) {
       },
     });
 
-    setLoading(false);
-
-    if (error) return setError(error.message);
+    if (error) {
+      setLoading(false);
+      return setError(error.message);
+    }
 
     if (data?.session) {
+      // Email confirmation is off for this project, or already satisfied —
+      // there's a session immediately, so create the shop now instead of
+      // waiting for a login that may never come.
+      const { error: acceptErr } = await supabase.rpc("accept_shop_invite", { p_code: inviteCode.trim() });
+      if (acceptErr) {
+        setLoading(false);
+        return setError(acceptErr.message || "Account created, but we couldn't set up your shop. Please contact support.");
+      }
       setSuccessMsg("Account created. You’re signed in — heading to your dashboard.");
     } else {
       setSuccessMsg("Account created. Check your email to confirm your address, then return here to log in.");
     }
+    setLoading(false);
   };
 
   return (
