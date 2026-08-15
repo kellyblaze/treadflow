@@ -54,7 +54,14 @@ tiers — confirmed status of the ones that were in doubt:
   with the user; "Get Started" now routes to the invite-application
   form instead of Stripe Checkout. See change log.
 - ⚠️ Real Stripe Price IDs for the 3 plans (`STRIPE_PRICE_EARLY_PARTNER`
-  etc.) — status not reconfirmed this session; see README's env var table.
+  etc.) — still not reconfirmed; this session couldn't check either (no
+  Vercel/Stripe credentials in this environment — `vercel whoami` logs
+  out, no `STRIPE_*` env vars available here). Lower urgency than it
+  looks: since the checkout-bypass fix above, nothing in the live UI
+  calls `/api/create-checkout-session` anymore, so these vars are
+  dormant config, not a live-flow risk. User chose to skip verifying
+  this for now; revisit if/when a real self-serve billing flow gets
+  built. See README's env var table.
 
 ## Environment constraints worth remembering
 
