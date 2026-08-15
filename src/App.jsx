@@ -3602,6 +3602,8 @@ function ShopSettings({ shopId, showToast }) {
   const [savingStorefrontSections, setSavingStorefrontSections] = useState(false);
   const [googleReviewUrl, setGoogleReviewUrl] = useState("");
   const [savingGoogleReviewUrl, setSavingGoogleReviewUrl] = useState(false);
+  const [depositAmount, setDepositAmount] = useState(50);
+  const [savingDepositAmount, setSavingDepositAmount] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -3609,7 +3611,7 @@ function ShopSettings({ shopId, showToast }) {
     (async () => {
       const { data, error } = await supabase
         .from("shops")
-        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections, google_review_url")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections, google_review_url, deposit_amount")
         .eq("id", shopId)
         .maybeSingle();
       if (cancelled) return;
@@ -3629,9 +3631,30 @@ function ShopSettings({ shopId, showToast }) {
         setStorefrontSections(prev => ({ ...prev, ...data.storefront_sections }));
       }
       setGoogleReviewUrl(data.google_review_url || "");
+      setDepositAmount(data.deposit_amount ?? 50);
     })();
     return () => { cancelled = true; };
   }, [shopId, showToast]);
+
+  const saveDepositAmount = async () => {
+    if (!shopId) return;
+    const amount = Number(depositAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      showToast("Enter a valid deposit amount.");
+      return;
+    }
+    setSavingDepositAmount(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({ deposit_amount: amount })
+      .eq("id", shopId);
+    setSavingDepositAmount(false);
+    if (error) {
+      showToast(error.message || "Unable to save deposit amount.");
+      return;
+    }
+    showToast("Deposit amount saved.");
+  };
 
   const saveGoogleReviewUrl = async () => {
     if (!shopId) return;
@@ -3783,8 +3806,13 @@ function ShopSettings({ shopId, showToast }) {
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Order Settings</div>
-        {[["Tax Rate","7.0%"],["Installation Fee","$25.00"],["Disposal Fee","$5.00"],["Deposit Amount","$50.00"]].map(([l, v]) => <div key={l} style={{ marginBottom: 12 }}><label style={S.label}>{l}</label><input style={S.input} defaultValue={v} /></div>)}
-        <button onClick={() => showToast("Settings saved!")} style={S.btn("primary")}>Save Changes</button>
+        {[["Tax Rate","7.0%"],["Installation Fee","$25.00"],["Disposal Fee","$5.00"]].map(([l, v]) => <div key={l} style={{ marginBottom: 12 }}><label style={S.label}>{l}</label><input style={S.input} defaultValue={v} /></div>)}
+        <div style={{ marginBottom: 12 }}>
+          <label style={S.label}>Deposit Amount ($)</label>
+          <input style={S.input} type="number" min="0" step="1" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+          <div style={{ fontSize: 12, color: COLORS.gray500, marginTop: 4 }}>Charged when a customer chooses "Pay deposit online" on your storefront.</div>
+        </div>
+        <button onClick={saveDepositAmount} disabled={savingDepositAmount} style={S.btn("primary")}>{savingDepositAmount ? "Saving…" : "Save Deposit Amount"}</button>
       </div>
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Mobile Service</div>
@@ -4116,6 +4144,7 @@ export async function storefrontSubmitReservation(shopId, {
   mobileTimeSlot = "",
   mobileDate = "",
   notes = "",
+  status = "pending",
 }) {
   if (!shopId) throw new Error("Missing shop.");
   const qty = Math.max(1, Math.min(99, parseInt(String(quantity), 10) || 1));
@@ -4152,7 +4181,7 @@ export async function storefrontSubmitReservation(shopId, {
       customer_phone: phone,
       quantity: qty,
       total,
-      status: "pending",
+      status,
       sms_consent: smsConsent,
       is_mobile: isMobile,
       service_address: serviceAddress,
@@ -4195,6 +4224,7 @@ function Storefront({ nav, initialTireSlug }) {
     mobile_service_hours_end: "6:00 PM",
     hero_video_url: "",
     storefront_sections: {},
+    deposit_amount: 50,
   });
   const [activePromotion, setActivePromotion] = useState(null);
   const [searchMode, setSearchMode] = useState("size");
@@ -4234,7 +4264,7 @@ function Storefront({ nav, initialTireSlug }) {
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections")
+      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections, deposit_amount")
       .eq("slug", PUBLIC_STOREFRONT_SLUG)
       .maybeSingle()
       .then(({ data }) => {
@@ -4251,6 +4281,7 @@ function Storefront({ nav, initialTireSlug }) {
           mobile_service_hours_end: data.mobile_service_hours_end || "6:00 PM",
           hero_video_url: (data.hero_video_url || "").trim(),
           storefront_sections: (data.storefront_sections && typeof data.storefront_sections === "object") ? data.storefront_sections : {},
+          deposit_amount: data.deposit_amount ?? 50,
         });
       });
     return () => { cancelled = true; };
@@ -4279,35 +4310,6 @@ function Storefront({ nav, initialTireSlug }) {
     return () => { cancelled = true; };
   }, [publicShopId]);
 
-  // Handle deposit payment success
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("deposit_success") === "true") {
-      const pending = sessionStorage.getItem("pendingReservation");
-      if (pending) {
-        try {
-          const data = JSON.parse(pending);
-          (async () => {
-            try {
-              const id = await storefrontSubmitReservation(publicShopId, data);
-              setSavedOrderId(id);
-              sessionStorage.removeItem("pendingReservation");
-              // Clean URL
-              window.history.replaceState({}, document.title, window.location.pathname);
-            } catch (e) {
-              console.warn("Post-deposit order error:", e);
-              setOrderError("Order creation failed. Please contact support.");
-            } finally {
-              setOrderSubmitting(false);
-            }
-          })();
-        } catch (e) {
-          console.warn("Pending reservation parse error:", e);
-        }
-      }
-    }
-  }, [publicShopId]);
-
   const [search, setSearch] = useState("");
   const [condFilter, setCondFilter] = useState("All");
   const [selectedTire, setSelectedTire] = useState(null);
@@ -4329,7 +4331,7 @@ function Storefront({ nav, initialTireSlug }) {
   const [resTime, setResTime] = useState("8:00 AM");
   const [resServiceAddress, setResServiceAddress] = useState("");
   const [resMobileTimeSlot, setResMobileTimeSlot] = useState("");
-  const [resPayment, setResPayment] = useState("Pay deposit online ($50)");
+  const [resPayment, setResPayment] = useState("deposit");
   const [resNotes, setResNotes] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
   const [mobileTimeSlots, setMobileTimeSlots] = useState([]);
@@ -4378,6 +4380,26 @@ function Storefront({ nav, initialTireSlug }) {
     return () => { cancelled = true; };
   }, [publicShopId]);
   const [savedOrderId, setSavedOrderId] = useState(null);
+
+  // Handle return from the deposit/full-payment Checkout Session. The order
+  // was already created (in "Awaiting Payment" status) before redirecting to
+  // Stripe, and the webhook — not this return trip — is what actually
+  // confirms payment and flips the order to "Pending". This effect only
+  // updates what the customer sees; it never re-creates or trusts anything
+  // about payment success from the URL alone.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("deposit_success") === "true") {
+      const orderId = params.get("order_id");
+      if (orderId) setSavedOrderId(orderId);
+      setOrderDone(true);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get("deposit_cancelled") === "true") {
+      setOrderError("Payment was cancelled. Your reservation was not completed — you can try again below.");
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [publicShopId]);
+
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([{ from: "bot", text: "Hi! Welcome to Greenville Tire Pros. Ask me anything about our inventory, services, or hours." }]);
@@ -4635,9 +4657,9 @@ function Storefront({ nav, initialTireSlug }) {
             <div style={{ gridColumn: "1/-1" }}>
               <label style={S.label}>Payment Option</label>
               <select style={{ ...S.select, width: "100%" }} value={resPayment} onChange={e => setResPayment(e.target.value)}>
-                <option>Pay deposit online ($50)</option>
-                <option>Pay in full online</option>
-                <option>Pay at shop</option>
+                <option value="deposit">{`Pay deposit online ($${Number(publicShopInfo.deposit_amount || 50).toFixed(0)})`}</option>
+                <option value="full">Pay in full online</option>
+                <option value="shop">Pay at shop</option>
               </select>
             </div>
             <div style={{ gridColumn: "1/-1" }}>
@@ -4695,35 +4717,15 @@ function Storefront({ nav, initialTireSlug }) {
                 }
               }
               setOrderSubmitting(true);
-              
-              // Handle deposit collection via Stripe
-              if (resPayment === "Pay deposit online ($50)") {
-                const depositLink = import.meta.env.VITE_STRIPE_DEPOSIT_LINK;
-                if (depositLink) {
-                  // Store reservation data temporarily for after payment
-                  sessionStorage.setItem("pendingReservation", JSON.stringify({
-                    orderTire,
-                    name,
-                    phone,
-                    email,
-                    vehicleRaw,
-                    quantity: resQuantity,
-                    smsConsent,
-                    shopName: publicShopInfo.name,
-                    ownerPhone: publicShopInfo.phone,
-                    isMobile,
-                    serviceAddress: resServiceAddress,
-                    mobileTimeSlot: resMobileTimeSlot,
-                    mobileDate: resDate,
-                    notes: resNotes,
-                  }));
-                  // Redirect to Stripe with return URL
-                  window.location.href = `${depositLink}?return=${encodeURIComponent(window.location.href + "?deposit_success=true")}`;
-                  return;
-                }
-              }
-              
+
+              const onlinePaymentMode = resPayment === "deposit" ? "deposit" : resPayment === "full" ? "full" : null;
+
               try {
+                // Order is created up front either way — for online payment
+                // it starts as "Awaiting Payment" and only the webhook (a
+                // real, Stripe-verified signal) ever confirms it. It never
+                // gets confirmed just because the browser came back with a
+                // success flag in the URL.
                 const id = await storefrontSubmitReservation(publicShopId, {
                   orderTire,
                   name,
@@ -4739,17 +4741,13 @@ function Storefront({ nav, initialTireSlug }) {
                   mobileTimeSlot: resMobileTimeSlot,
                   mobileDate: resDate,
                   notes: resNotes,
+                  status: onlinePaymentMode ? "Awaiting Payment" : "pending",
                 });
                 setSavedOrderId(id);
                 const tireName = `${orderTire.brand} ${orderTire.model}`;
                 const qtyNum = Math.max(1, Math.min(99, parseInt(String(resQuantity), 10) || 1));
                 const totalStr = +(qtyNum * Number(orderTire.price)).toFixed(2);
-                try {
-                  const custTpl = reservationConfirmation(name, tireName, publicShopInfo.name, storefront.phone);
-                  await sendEmail(email, custTpl.subject, custTpl.html);
-                } catch (e) {
-                  console.warn("Reservation confirmation email:", e);
-                }
+
                 if (publicShopInfo.email) {
                   try {
                     const shopTpl = orderNotification(name, tireName, qtyNum, totalStr);
@@ -4757,6 +4755,30 @@ function Storefront({ nav, initialTireSlug }) {
                   } catch (e) {
                     console.warn("Shop order notification email:", e);
                   }
+                }
+
+                if (onlinePaymentMode) {
+                  const res = await fetch("/api/create-deposit-checkout", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ orderId: id, shopId: publicShopId, mode: onlinePaymentMode, returnPath: window.location.pathname }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok || !data.url) {
+                    setOrderError(data.error || "Unable to start checkout. Please try again.");
+                    setOrderSubmitting(false);
+                    return;
+                  }
+                  window.location.href = data.url;
+                  return;
+                }
+
+                // "Pay at shop" — no online payment, customer is confirmed now.
+                try {
+                  const custTpl = reservationConfirmation(name, tireName, publicShopInfo.name, storefront.phone);
+                  await sendEmail(email, custTpl.subject, custTpl.html);
+                } catch (e) {
+                  console.warn("Reservation confirmation email:", e);
                 }
                 setOrderDone(true);
               } catch (err) {

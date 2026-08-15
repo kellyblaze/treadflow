@@ -87,6 +87,12 @@ async function applyShopUpdate(supabase, shopId, updates) {
 }
 
 async function handleCheckoutSessionCompleted(supabase, stripe, session) {
+  // Storefront deposit/full-payment checkouts share this same Stripe event
+  // type with shop subscription checkouts, distinguished by metadata.flow.
+  if (session.metadata?.flow === "deposit") {
+    return handleDepositCheckoutCompleted(supabase, session);
+  }
+
   const { shopId, customerId } = await findShopForObject(supabase, stripe, session);
   const plan = session.metadata?.plan || null;
   return applyShopUpdate(supabase, shopId, {
@@ -95,6 +101,54 @@ async function handleCheckoutSessionCompleted(supabase, stripe, session) {
     stripe_subscription_id: typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null,
     ...(plan ? { plan } : {}),
   });
+}
+
+// Not importing src/email.js here — this webhook is the one path that must
+// never fail to build/deploy, so it stays isolated with its own minimal
+// inline template rather than sharing a module boundary with client code.
+async function sendCustomerConfirmationEmail(to, customerName, tireName, shopName, shopPhone) {
+  const resendUrl = (process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL) + "/functions/v1/send-email";
+  const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY;
+  if (!to || !anonKey) return;
+  try {
+    await fetch(resendUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to,
+        subject: `Your tire reservation at ${shopName} is confirmed`,
+        html: `<h2>Hi ${customerName},</h2><p>Your deposit has been received and your reservation for <strong>${tireName}</strong> at <strong>${shopName}</strong> is confirmed.</p><p>We will contact you shortly to confirm your installation appointment.</p><p>Questions? Call us at ${shopPhone}.</p><p>Thank you,<br/>${shopName}</p>`,
+      }),
+    });
+  } catch (err) {
+    console.warn("Deposit confirmation email failed:", err);
+  }
+}
+
+async function handleDepositCheckoutCompleted(supabase, session) {
+  const orderId = session.metadata?.order_id;
+  const shopId = session.metadata?.shop_id;
+  if (!orderId || !shopId) return { updated: false, reason: "missing order/shop metadata" };
+
+  const { data: order, error: orderErr } = await supabase
+    .from("orders")
+    .update({ status: "Pending" })
+    .eq("id", orderId)
+    .eq("shop_id", shopId)
+    .select("id, tire_id, customer_name, customer_email")
+    .maybeSingle();
+  if (orderErr) throw orderErr;
+  if (!order) return { updated: false };
+
+  const [{ data: shop }, { data: tire }] = await Promise.all([
+    supabase.from("shops").select("name, phone").eq("id", shopId).maybeSingle(),
+    order.tire_id ? supabase.from("tires").select("brand, model").eq("id", order.tire_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+
+  const tireName = tire ? `${tire.brand} ${tire.model}` : "your tire order";
+  await sendCustomerConfirmationEmail(order.customer_email, order.customer_name, tireName, shop?.name || "the shop", shop?.phone || "");
+
+  return { updated: true, orderId };
 }
 
 async function handleSubscriptionUpsert(supabase, stripe, subscription) {
