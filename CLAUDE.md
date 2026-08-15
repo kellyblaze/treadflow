@@ -31,10 +31,12 @@ tiers — confirmed status of the ones that were in doubt:
 - ✅ Real (as of this session): plan-tier gating — `planHasFeature()` in
   `src/helpers.js` enforces which of the above a shop's plan actually
   includes, everywhere they're used.
-- ❌ **AI chatbot** — not real AI. `sendChat()` in `Storefront` is a
-  hardcoded keyword-matcher, and it's not even shop-specific (replies
-  reference a fixed demo shop name/phone regardless of which real shop is
-  running it).
+- ✅ Removed (as of this session): **AI chatbot** — was never real AI
+  (`sendChat()` in `Storefront` was a hardcoded keyword-matcher, and not
+  even shop-specific — every shop showed a widget hardcoded to
+  "Greenville Tire Chat"/a demo phone number). Decision was to rip out
+  the fake widget and the pricing claim rather than build a real one —
+  no chatbot ships today on any plan. See change log.
 - ❌ **Custom domain support** — still doesn't exist anywhere in the
   codebase. As of this session the pricing page no longer claims
   otherwise (see change log) — this line now just tracks that the
@@ -69,6 +71,24 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-15 — Removed the fake AI chatbot instead of building it
+Decision: rip out the "AI chatbot" claim rather than wire it to a real
+LLM. Removed from `src/helpers.js` (Market Leader pricing bullet) and
+from `src/App.jsx`: the storefront's floating chat widget
+(`chatOpen`/`chatInput`/`chatMessages` state, `sendChat()`
+keyword-matcher, and its JSX), plus the now-inert "Live Chatbot" toggle
+in Shop Settings > Storefront Sections (nothing read
+`storefrontSections.chatbot` once the widget was gone). The widget was
+never real AI and wasn't even shop-specific — it showed "Greenville Tire
+Chat" and a demo phone number on every shop's live storefront regardless
+of which real shop was running it, so this was a live broken feature for
+any real customer, not just a marketing overclaim. Left the "AI chatbot"
+checkbox on the invite-application form (`InvitePage`) untouched — that's
+an applicant interest survey, not a claim of an existing feature. Build
+clean, lint baseline unchanged (36), all 54 tests pass. Not yet merged to
+`main` (open on `claude/next-build-tasks-bypuec`, no PR opened per
+instructions not to open one unless asked).
 
 ### 2026-08-15 — Stop advertising nonexistent custom domain support
 Pricing-page FAQ claimed "Yes — custom domain support is available on the
