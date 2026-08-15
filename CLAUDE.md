@@ -16,7 +16,7 @@ the file in sync with reality rather than letting it drift.
 | Vercel deploys | Auto-deploys on push/merge to `main` via GitHub integration. Manual `vercel --prod` from this CLI session returns "Not authorized" (needs `--scope powerlink-marketing-groups-projects`) — usually irrelevant since merging to `main` deploys automatically anyway. |
 | Supabase project | ref `uuivxrphoviaqehhpxdy`, org `mhwkxpyazswbrylzrxpb`, region us-east-2, under account `info@treadflow.cc` — **always confirm with `list_projects` before running any migration**; a differently-named project ("EverBranch") has shown up connected in this environment before. |
 | Platform admin | `kellyblazeent@gmail.com` is the first (and currently only) `platform_admins` row, granted via manual SQL after self-registering through the real signup flow. |
-| Migrations | Every file in `supabase/migrations/` has been applied to the live project, through `20260720000009_deposit_checkout.sql`. Apply new ones with the Supabase MCP `apply_migration` tool, not raw `psql`. |
+| Migrations | Every file in `supabase/migrations/` has been applied to the live project, through `20260720000010_shop_owner_invite_acceptance.sql`. Apply new ones with the Supabase MCP `apply_migration` tool, not raw `psql`. |
 
 ## What's actually built vs. what just looks built
 
@@ -38,9 +38,10 @@ tiers — confirmed status of the ones that were in doubt:
 - ❌ **Custom domain support** — doesn't exist anywhere in the codebase.
   The FAQ answer claiming it's available on Market Leader is the only
   place this feature is mentioned at all.
-- ⚠️ **Shop creation after signup is unverified** — no code anywhere
-  creates a `shops` row after invite → approve → signup completes. Never
-  confirmed whether a Postgres trigger or manual step handles this.
+- ✅ Real (as of this session): **shop creation after signup** — was
+  confirmed broken (no code path, client or database, ever created a
+  `shops` row after invite → approve → signup), now fixed via
+  `accept_shop_invite()`, see change log.
 - ⚠️ **Landing-page pricing checkout bypasses the invite-only funnel** —
   a visitor can pay before being invited, and that payment doesn't create
   or link to a shop record. Left as-is deliberately (product decision, not
@@ -67,6 +68,29 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-15 — Shop creation on signup was completely broken; fixed
+Confirmed the open item from the audit: no code path anywhere — client or
+database — ever created a `shops` row after a shop owner completed the
+real invite → signup flow. Verified directly against the live project via
+`pg_trigger` (no application-defined trigger on `auth.users`) and by
+reading `SignUpPage.onSubmit` (only ever called `auth.signUp()`, nothing
+else). Any real approved applicant who signed up got a working login and
+a permanently dead account (the "Shop not found" screen) — this was the
+single most important flow in the product and it silently didn't work.
+Fix: new `accept_shop_invite(p_code)` SQL function mirroring the existing
+`accept_staff_invite` pattern — creates the `shops` row (enriched from the
+originating `applications` row when available), generates a unique slug,
+marks the invite used, idempotent. Hardened with an `auth.uid() is null`
+check and `revoke ... from public` before granting to `authenticated`
+only — `invite_codes` has an open public SELECT policy, so without that
+check an anonymous caller could have burned a real customer's invite code
+with no account ever attached to it (caught and fixed before merge).
+`SignUpPage` calls it when signup returns a live session; `LoginPage`
+calls it on first login (the common path, since email confirmation is
+normally required) — same as the existing staff-invite call site.
+PR [#6](https://github.com/kellyblaze/treadflow/pull/6), merged, deployed.
+Migration `20260720000010_shop_owner_invite_acceptance.sql` applied live.
 
 ### 2026-08-15 — Plan-tier feature gating
 Added `planHasFeature(planName, featureName)` (cumulative tier check) to
