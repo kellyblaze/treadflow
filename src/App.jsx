@@ -311,7 +311,7 @@ function LandingPage({ nav }) {
   const faqs = [
     ["Is TreadFlow open to any tire shop?", "No. TreadFlow is invite-only. We review each applicant for market fit and shop readiness before granting access."],
     ["How does the invite process work?", "Submit an application. Our team reviews your market and shop fit. If approved, you receive a private invite link to create your account."],
-    ["Can I have my own domain?", "Yes — custom domain support is available on the Market Leader plan."],
+    ["Can I have my own domain?", "Not yet. Every TreadFlow storefront lives at treadflow.cc/shop/your-shop-name today — custom domain support isn't available on any plan yet, but it's on our roadmap."],
     ["How long does setup take?", "Most shops are live within 5–10 business days after approval, including storefront design and inventory setup."],
     ["Do I own my customer data?", "Absolutely. Your customers, orders, and inventory data belong to you."],
   ];

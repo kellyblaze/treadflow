@@ -22,7 +22,7 @@ export const PLAN_TIER_DEFS = [
     price: 399,
     highlight: false,
     paymentLink: "https://buy.stripe.com/14AfZbcf9d2W4XzdbG4Rq02",
-    tierFeatures: ["AI chatbot", "Custom domain support", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"],
+    tierFeatures: ["AI chatbot", "Promotions & coupons", "Advanced reporting", "Multi-location support", "Priority onboarding"],
   },
 ];
 
