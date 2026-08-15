@@ -3624,7 +3624,7 @@ function ShopSettings({ shopId, showToast }) {
   const [galleryImages, setGalleryImages] = useState([]);
   const [savingGallery, setSavingGallery] = useState(false);
   const [galleryStorageMissing, setGalleryStorageMissing] = useState(false);
-  const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, chatbot: true, announcement: true });
+  const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, announcement: true });
   const [savingStorefrontSections, setSavingStorefrontSections] = useState(false);
   const [googleReviewUrl, setGoogleReviewUrl] = useState("");
   const [savingGoogleReviewUrl, setSavingGoogleReviewUrl] = useState(false);
@@ -3962,7 +3962,7 @@ function ShopSettings({ shopId, showToast }) {
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Storefront Sections</div>
         <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 16 }}>Choose which sections appear on your public storefront.</div>
         <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-          {[["hero_video", "Hero Video Background"], ["announcement", "Announcement Bar"], ["trust_badges", "Trust Badges"], ["size_finder", "Tire Size Finder Button"], ["services", "Services Section"], ["gallery", "Photo Gallery"], ["maps", "Google Maps"], ["reviews", "Customer Reviews"], ["chatbot", "Live Chatbot"]].map(([key, label]) => (
+          {[["hero_video", "Hero Video Background"], ["announcement", "Announcement Bar"], ["trust_badges", "Trust Badges"], ["size_finder", "Tire Size Finder Button"], ["services", "Services Section"], ["gallery", "Photo Gallery"], ["maps", "Google Maps"], ["reviews", "Customer Reviews"]].map(([key, label]) => (
             <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
               <input
                 type="checkbox"
@@ -4441,9 +4441,6 @@ function Storefront({ nav, initialTireSlug }) {
     }
   }, [publicShopId]);
 
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState([{ from: "bot", text: "Hi! Welcome to Greenville Tire Pros. Ask me anything about our inventory, services, or hours." }]);
   const [showTireSizeFinder, setShowTireSizeFinder] = useState(false);
   const [tireWidth, setTireWidth] = useState("");
   const [tireAspectRatio, setTireAspectRatio] = useState("");
@@ -4585,19 +4582,6 @@ function Storefront({ nav, initialTireSlug }) {
       </div>
     </div>
   );
-
-  const sendChat = () => {
-    if (!chatInput.trim()) return;
-    const msg = chatInput.toLowerCase();
-    let reply = "I'm not sure about that. Please call us at (864) 555-0142 for more info!";
-    if (msg.includes("hour") || msg.includes("open")) reply = "We're open Mon–Fri 8am–6pm and Saturday 8am–4pm. Closed Sundays.";
-    else if (msg.includes("install")) reply = "Installation starts at $25 per tire. Book online or call us to schedule.";
-    else if (msg.includes("used")) reply = "Yes! We sell quality used tires, all inspected and priced fairly.";
-    else if (msg.includes("reserve") || msg.includes("order")) reply = "You can reserve tires directly from the tire listing. Click 'Reserve Now' on any tire card.";
-    else if (msg.includes("225") || msg.includes("215") || msg.includes("265") || msg.includes("tire")) reply = "We have new and used tires in stock! Use the search and filter above to find your size.";
-    setChatMessages(m => [...m, { from: "user", text: chatInput }, { from: "bot", text: reply }]);
-    setChatInput("");
-  };
 
   if (orderDone) return (
     <div style={{ minHeight: "100vh", background: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
@@ -5128,25 +5112,6 @@ function Storefront({ nav, initialTireSlug }) {
           <div><div style={{ color: "#fff", fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{storefront.name}</div><div>{storefront.address}</div><div>{storefront.hours}</div><div style={{ marginTop: 4 }}>{storefront.phone}</div></div>
           <div style={{ textAlign: "right" }}><div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>Powered by TreadFlow</div></div>
         </div>
-      </div>
-      {/* Chatbot */}
-      <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 100 }}>
-        {chatOpen && <div style={{ width: 320, background: "#fff", borderRadius: 16, border: "1px solid #E2E8F0", boxShadow: "0 8px 32px rgba(0,0,0,0.15)", marginBottom: 12, overflow: "hidden" }}>
-          <div style={{ background: storefront.primaryColor, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>🤖 Greenville Tire Chat</div>
-            <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18 }}>×</button>
-          </div>
-          <div style={{ height: 220, overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-            {chatMessages.map((m, i) => <div key={i} style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start" }}>
-              <div style={{ background: m.from === "bot" ? COLORS.gray100 : storefront.primaryColor, color: m.from === "user" ? "#fff" : COLORS.gray800, borderRadius: 10, padding: "8px 12px", fontSize: 13, maxWidth: "80%", lineHeight: 1.5 }}>{m.text}</div>
-            </div>)}
-          </div>
-          <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid #E2E8F0" }}>
-            <input style={{ ...S.input, flex: 1, fontSize: 13 }} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendChat()} placeholder="Ask a question..." />
-            <button onClick={sendChat} style={{ ...S.btn("primary", "sm") }}>→</button>
-          </div>
-        </div>}
-        <button onClick={() => setChatOpen(!chatOpen)} style={{ width: 56, height: 56, borderRadius: "50%", background: storefront.primaryColor, border: "none", color: "#fff", fontSize: 24, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>{chatOpen ? "×" : "💬"}</button>
       </div>
       {/* Mobile sticky call bar */}
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.orange, padding: "14px 20px", display: "flex", gap: 12, zIndex: 90 }}>
