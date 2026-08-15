@@ -45,10 +45,14 @@ tiers — confirmed status of the ones that were in doubt:
   confirmed broken (no code path, client or database, ever created a
   `shops` row after invite → approve → signup), now fixed via
   `accept_shop_invite()`, see change log.
-- ⚠️ **Landing-page pricing checkout bypasses the invite-only funnel** —
-  a visitor can pay before being invited, and that payment doesn't create
-  or link to a shop record. Left as-is deliberately (product decision, not
-  a bug) while other billing mechanics were hardened.
+- ✅ Fixed (as of this session): **landing-page checkout bypassing the
+  invite-only funnel** — re-investigated; this wasn't just a soft
+  funnel-skip as previously logged, it was an active billing bug: a
+  stranger could pay a real recurring Stripe subscription with zero
+  confirmation and zero shop/account ever created (the webhook no-ops
+  when it can't match an existing `shops` row). Confirmed unintended
+  with the user; "Get Started" now routes to the invite-application
+  form instead of Stripe Checkout. See change log.
 - ⚠️ Real Stripe Price IDs for the 3 plans (`STRIPE_PRICE_EARLY_PARTNER`
   etc.) — status not reconfirmed this session; see README's env var table.
 
@@ -71,6 +75,35 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-15 — Disabled the landing-page checkout bypass
+Re-investigated the "landing-page checkout bypasses invite funnel" item
+flagged (but left as-is) in an earlier session, at the user's request to
+confirm whether it was intended. It wasn't just a funnel-skip: the public
+pricing page's "Get Started" buttons created a real Stripe subscription
+Checkout Session for anyone, invited or not
+(`/api/create-checkout-session`). On success Stripe redirected to
+`/?checkout_success=true`, which the app never handled anywhere — no
+confirmation, no next steps. The `checkout.session.completed` webhook
+looks up a `shops` row by `stripe_customer_id`/email to apply the
+update; a brand-new payer with no invited account matches nothing, so
+`applyShopUpdate` silently no-ops. Net effect: a stranger could be
+charged a real recurring subscription and get nothing — no account, no
+shop, no error, no automated recovery path. Presented the finding to the
+user, who confirmed this was unintended and chose to disable public
+checkout entirely. Fix: "Get Started" buttons now call `nav("invite")`
+instead of `startCheckout()`, routing to the invite-application form —
+matches the pricing section's own existing copy ("Plans are assigned
+after your application is reviewed and approved"). Removed the dead
+`startCheckout()`/`checkoutLoadingPlan` state and the unused
+module-level `redirectTo()` helper. Left `api/create-checkout-session.js`
+in place (unreachable from the UI now, but harmless — reusable if a real
+post-approval self-serve billing flow is ever built; today
+`ShopBilling`/Settings > Billing is read-only, plan is set manually by a
+super admin on approval). Build clean, lint baseline unchanged (36), all
+54 tests pass. Not yet merged to `main` (open on
+`claude/next-build-tasks-bypuec`, no PR opened per instructions not to
+open one unless asked).
 
 ### 2026-08-15 — Removed the fake AI chatbot instead of building it
 Decision: rip out the "AI chatbot" claim rather than wire it to a real
