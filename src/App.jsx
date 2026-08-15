@@ -16,7 +16,6 @@ import {
   buildWaitlistPayload,
   parseVehicleFields,
 } from "./helpers";
-const redirectTo = (url) => { window.location.href = url; };
 const sendSms = async (to, message) => {
   try {
     const res = await fetch("/api/send-sms", {
@@ -275,28 +274,6 @@ function MetricCard({ label, value, sub, color }) {
 function LandingPage({ nav }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
-  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState(null);
-
-  const startCheckout = async (plan) => {
-    setCheckoutLoadingPlan(plan);
-    try {
-      const res = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        alert(data.error || "Unable to start checkout.");
-        setCheckoutLoadingPlan(null);
-        return;
-      }
-      redirectTo(data.url);
-    } catch (err) {
-      alert(err.message || "Unable to start checkout.");
-      setCheckoutLoadingPlan(null);
-    }
-  };
 
   const features = [
     { icon: "🛞", title: "Online Tire Storefront", desc: "Your own branded tire shop website with searchable inventory, live pricing, and tire detail pages." },
@@ -379,7 +356,7 @@ function LandingPage({ nav }) {
             <div style={{ fontSize: 40, fontWeight: 800, color: p.highlight ? COLORS.blue : COLORS.gray900 }}>${p.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
             <div style={{ borderTop: "1px solid #E2E8F0", margin: "20px 0" }} />
             {p.features.map(f => <div key={f} style={{ display: "flex", gap: 8, fontSize: 14, color: COLORS.gray700, marginBottom: 8 }}><span style={{ color: COLORS.green }}>✓</span>{f}</div>)}
-            <button disabled={!!checkoutLoadingPlan} onClick={() => startCheckout(p.name)} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20, opacity: checkoutLoadingPlan && checkoutLoadingPlan !== p.name ? 0.6 : 1 }}>{checkoutLoadingPlan === p.name ? "Redirecting…" : "Get Started →"}</button>
+            <button onClick={() => nav("invite")} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20 }}>Request an Invite →</button>
           </div>)}
         </div>
         <div style={{ textAlign: "center", marginTop: 40, color: COLORS.gray500, fontSize: 13 }}>
