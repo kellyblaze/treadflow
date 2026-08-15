@@ -35,9 +35,10 @@ tiers — confirmed status of the ones that were in doubt:
   hardcoded keyword-matcher, and it's not even shop-specific (replies
   reference a fixed demo shop name/phone regardless of which real shop is
   running it).
-- ❌ **Custom domain support** — doesn't exist anywhere in the codebase.
-  The FAQ answer claiming it's available on Market Leader is the only
-  place this feature is mentioned at all.
+- ❌ **Custom domain support** — still doesn't exist anywhere in the
+  codebase. As of this session the pricing page no longer claims
+  otherwise (see change log) — this line now just tracks that the
+  underlying feature remains unbuilt, not a false-advertising bug.
 - ✅ Real (as of this session): **shop creation after signup** — was
   confirmed broken (no code path, client or database, ever created a
   `shops` row after invite → approve → signup), now fixed via
@@ -68,6 +69,19 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-15 — Stop advertising nonexistent custom domain support
+Pricing-page FAQ claimed "Yes — custom domain support is available on the
+Market Leader plan," and "Custom domain support" appeared as a Market
+Leader bullet in `PLAN_TIER_DEFS` (`src/helpers.js`) — both false, no code
+anywhere implements it (every storefront is served at
+`treadflow.cc/shop/{slug}`). Rewrote the FAQ answer to say honestly that
+it isn't available yet, and dropped the bullet. Not read by
+`planHasFeature()` gating anywhere, so copy-only, no behavior change.
+Building the real feature (DNS verification + Vercel Domains API) is
+still open, tracked in the audit table above. Not yet merged to `main`
+(open on `claude/next-build-tasks-bypuec`, no PR opened per instructions
+not to open one unless asked).
 
 ### 2026-08-15 — Shop creation on signup was completely broken; fixed
 Confirmed the open item from the audit: no code path anywhere — client or
