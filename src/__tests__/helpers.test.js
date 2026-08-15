@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   planPrice,
+  planHasFeature,
   genInviteCode,
   tireFromSupabaseRow,
   formatOrderCreatedDate,
@@ -34,6 +35,32 @@ describe('planPrice', () => {
 
     // Assert
     expect(price).toBe(0);
+  });
+});
+
+describe('planHasFeature', () => {
+  test('a base-tier plan has its own feature', () => {
+    // Arrange / Act / Assert
+    expect(planHasFeature('Early Partner', 'Email notifications')).toBe(true);
+  });
+
+  test('a base-tier plan does not have a higher-tier feature', () => {
+    // Arrange / Act / Assert
+    expect(planHasFeature('Early Partner', 'SMS notifications')).toBe(false);
+    expect(planHasFeature('Early Partner', 'Advanced reporting')).toBe(false);
+  });
+
+  test('plans are cumulative — a higher tier includes lower-tier features', () => {
+    // Arrange / Act / Assert
+    expect(planHasFeature('Growth Partner', 'Email notifications')).toBe(true);
+    expect(planHasFeature('Market Leader', 'SMS notifications')).toBe(true);
+  });
+
+  test('returns false for an unknown or missing plan name', () => {
+    // Arrange / Act / Assert
+    expect(planHasFeature('Not A Real Plan', 'Email notifications')).toBe(false);
+    expect(planHasFeature(null, 'Email notifications')).toBe(false);
+    expect(planHasFeature(undefined, 'Email notifications')).toBe(false);
   });
 });
 

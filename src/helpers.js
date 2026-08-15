@@ -30,6 +30,15 @@ export function planPrice(planName) {
   return PLAN_TIER_DEFS.find(p => p.name === planName)?.price ?? 0;
 }
 
+// Plans are cumulative — Growth Partner includes everything in Early Partner
+// plus its own tierFeatures, and so on — so a shop on a given plan has every
+// feature listed by that tier or any tier below it.
+export function planHasFeature(planName, featureName) {
+  const tierIndex = PLAN_TIER_DEFS.findIndex(p => p.name === planName);
+  if (tierIndex === -1) return false;
+  return PLAN_TIER_DEFS.slice(0, tierIndex + 1).some(tier => tier.tierFeatures.includes(featureName));
+}
+
 export function genInviteCode(state) {
   const suffix = Math.random().toString(36).substring(2, 8).toUpperCase();
   return `TF-${(state || "XX").slice(0, 2).toUpperCase()}-${suffix}`;

@@ -145,13 +145,18 @@ describe('storefrontSubmitReservation', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
     vi.stubGlobal('fetch', fetchMock);
 
-    // Act — consent true, owner phone present: should text
-    await storefrontSubmitReservation('shop-1', { ...baseArgs, smsConsent: true, ownerPhone: '555-9999' });
+    // Act — consent true, owner phone present, plan includes SMS: should text
+    await storefrontSubmitReservation('shop-1', { ...baseArgs, smsConsent: true, ownerPhone: '555-9999', plan: 'Growth Partner' });
     expect(fetchMock).toHaveBeenCalledWith('/api/send-sms', expect.objectContaining({ method: 'POST' }));
 
     // Act — no consent: should not text
     fetchMock.mockClear();
-    await storefrontSubmitReservation('shop-1', { ...baseArgs, smsConsent: false, ownerPhone: '555-9999' });
+    await storefrontSubmitReservation('shop-1', { ...baseArgs, smsConsent: false, ownerPhone: '555-9999', plan: 'Growth Partner' });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Act — consent true, but shop's plan doesn't include SMS: should not text
+    fetchMock.mockClear();
+    await storefrontSubmitReservation('shop-1', { ...baseArgs, smsConsent: true, ownerPhone: '555-9999', plan: 'Early Partner' });
 
     // Assert
     expect(fetchMock).not.toHaveBeenCalled();

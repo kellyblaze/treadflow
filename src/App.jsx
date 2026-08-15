@@ -4,6 +4,7 @@ import { sendEmail, reservationConfirmation, orderNotification, orderStatusUpdat
 import {
   PLAN_TIER_DEFS,
   planPrice,
+  planHasFeature,
   genInviteCode,
   tireFromSupabaseRow,
   formatOrderCreatedDate,
@@ -245,6 +246,17 @@ function SidebarLink({ icon, label, active, onClick }) {
   return <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: active ? "#1E3A5F" : "transparent", border: "none", borderRadius: 8, padding: "10px 12px", cursor: "pointer", color: active ? "#fff" : "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: active ? 600 : 400, marginBottom: 2 }}>
     <span style={{ fontSize: 16 }}>{icon}</span>{label}
   </button>;
+}
+
+// Shown in place of a dashboard section the shop's current plan doesn't
+// include, instead of silently giving away Growth/Market Leader features to
+// every shop regardless of what they're paying for.
+function PlanUpgradeGate({ feature, planName }) {
+  return <div style={{ background: "#fff", borderRadius: 12, padding: "48px 32px", textAlign: "center", border: `1px solid ${COLORS.gray200}`, marginTop: 20 }}>
+    <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
+    <div style={{ fontWeight: 700, fontSize: 18, color: COLORS.gray900, marginBottom: 8 }}>{feature} isn't included in your plan</div>
+    <div style={{ color: COLORS.gray500, fontSize: 14 }}>Your current plan is {planName || "Early Partner"}. Upgrade from Settings &gt; Billing to unlock this.</div>
+  </div>;
 }
 
 function MetricCard({ label, value, sub, color }) {
@@ -1345,6 +1357,17 @@ function ShopDashboard({ nav }) {
     "Order Staff": new Set(["overview", "pos", "orders", "mobile", "appointments", "invoices"]),
   };
   const allowedSections = ROLE_SECTIONS[staffRole] ?? ROLE_SECTIONS.Owner;
+  // Sections gated by plan tier — a shop only sees (and can only load) the
+  // ones its actual plan includes, matching the pricing page's feature list
+  // instead of quietly giving every shop the Market Leader feature set.
+  const FEATURE_BY_SECTION = {
+    appointments: "Appointment booking",
+    staff: "Staff accounts",
+    promotions: "Promotions & coupons",
+    analytics: "Advanced reporting",
+    locations: "Multi-location support",
+  };
+  const shopPlan = activeShop?.plan;
   const sidebar = [
     ["overview","📊","Overview"],
     ["pos","💵","Checkout"],
@@ -1361,7 +1384,8 @@ function ShopDashboard({ nav }) {
     ["locations","🏬","Locations"],
     ["settings","⚙️","Settings"],
     ["billing","💳","Billing"],
-  ].filter(([id]) => !allowedSections || allowedSections.has(id));
+  ].filter(([id]) => !allowedSections || allowedSections.has(id))
+   .filter(([id]) => !FEATURE_BY_SECTION[id] || planHasFeature(shopPlan, FEATURE_BY_SECTION[id]));
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -1449,16 +1473,16 @@ function ShopDashboard({ nav }) {
         )}
         {section === "overview" && <ShopOverview tires={tires} orders={orders} shopName={activeShop?.name} shopLocation={shopLocationLine} />}
         {section === "pos" && <POSPage shopId={shopId} shopName={activeShop?.name} tires={tires} setTires={setTires} showToast={showToast} />}
-        {section === "inventory" && <InventoryPage shopId={shopId} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
-        {section === "orders" && <OrdersPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} googleReviewUrl={activeShop?.google_review_url} orders={orders} setOrders={setOrders} showToast={showToast} />}
-        {section === "appointments" && <AppointmentsPage shopId={shopId} showToast={showToast} />}
-        {section === "mobile" && <MobileJobsPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} showToast={showToast} />}
+        {section === "inventory" && <InventoryPage shopId={shopId} plan={shopPlan} tires={tires} setTires={setTires} showToast={showToast} selectedTire={selectedTire} setSelectedTire={setSelectedTire} />}
+        {section === "orders" && <OrdersPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} plan={shopPlan} googleReviewUrl={activeShop?.google_review_url} orders={orders} setOrders={setOrders} showToast={showToast} />}
+        {section === "appointments" && (planHasFeature(shopPlan, "Appointment booking") ? <AppointmentsPage shopId={shopId} showToast={showToast} /> : <PlanUpgradeGate feature="Appointment booking" planName={shopPlan} />)}
+        {section === "mobile" && <MobileJobsPage shopId={shopId} shopName={activeShop?.name} shopPhone={storefront.phone} plan={shopPlan} showToast={showToast} />}
         {section === "customers" && <CustomersPage shopId={shopId} showToast={showToast} />}
         {section === "invoices" && <InvoicesPage shopId={shopId} shopName={activeShop?.name} orders={orders} showToast={showToast} />}
-        {section === "promotions" && <PromotionsPage shopId={shopId} showToast={showToast} />}
-        {section === "analytics" && <AnalyticsPage shopId={shopId} showToast={showToast} />}
-        {section === "staff" && <StaffPage shopId={shopId} shopName={activeShop?.name} showToast={showToast} />}
-        {section === "locations" && <LocationsPage shops={shops} setShops={setShops} activeShop={activeShop} setActiveShop={setActiveShop} showToast={showToast} />}
+        {section === "promotions" && (planHasFeature(shopPlan, "Promotions & coupons") ? <PromotionsPage shopId={shopId} showToast={showToast} /> : <PlanUpgradeGate feature="Promotions & coupons" planName={shopPlan} />)}
+        {section === "analytics" && (planHasFeature(shopPlan, "Advanced reporting") ? <AnalyticsPage shopId={shopId} showToast={showToast} /> : <PlanUpgradeGate feature="Advanced reporting" planName={shopPlan} />)}
+        {section === "staff" && (planHasFeature(shopPlan, "Staff accounts") ? <StaffPage shopId={shopId} shopName={activeShop?.name} showToast={showToast} /> : <PlanUpgradeGate feature="Staff accounts" planName={shopPlan} />)}
+        {section === "locations" && (planHasFeature(shopPlan, "Multi-location support") ? <LocationsPage shops={shops} setShops={setShops} activeShop={activeShop} setActiveShop={setActiveShop} showToast={showToast} /> : <PlanUpgradeGate feature="Multi-location support" planName={shopPlan} />)}
         {section === "settings" && <ShopSettings shopId={shopId} showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
         {section === "billing" && <ShopBilling shopId={shopId} plan={activeShop?.plan} status={activeShop?.status} />}
@@ -1544,7 +1568,7 @@ function ShopOverview({ tires, orders, shopName, shopLocation }) {
   </div>;
 }
 
-function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSelectedTire }) {
+function InventoryPage({ shopId, plan, tires, setTires, showToast, selectedTire, setSelectedTire }) {
   const isMobile = useWindowWidth() < 768;
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1977,7 +2001,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
       <div><h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Inventory</h2><p style={{ color: COLORS.gray500, marginTop: 4 }}>{tires.reduce((a, t) => a + t.qty, 0)} total tires in stock</p></div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-        <button type="button" onClick={() => setShowCsvModal(true)} style={S.btn("secondary")}>📤 CSV Upload</button>
+        {planHasFeature(plan, "CSV inventory upload") && <button type="button" onClick={() => setShowCsvModal(true)} style={S.btn("secondary")}>📤 CSV Upload</button>}
         <button type="button" onClick={() => setShowVoiceModal(true)} style={S.btn("secondary")}>🎤 Voice Add</button>
         <button type="button" onClick={() => setShowAdd(true)} style={S.btn("primary")}>+ Add Tire</button>
       </div>
@@ -2116,7 +2140,7 @@ function InventoryPage({ shopId, tires, setTires, showToast, selectedTire, setSe
   </div>;
 }
 
-function OrdersPage({ shopId, shopName, shopPhone, googleReviewUrl, orders, setOrders, showToast }) {
+function OrdersPage({ shopId, shopName, shopPhone, plan, googleReviewUrl, orders, setOrders, showToast }) {
   const isMobile = useWindowWidth() < 768;
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [filter, setFilter] = useState("All");
@@ -2153,8 +2177,9 @@ function OrdersPage({ shopId, shopName, shopPhone, googleReviewUrl, orders, setO
     setOrders(os => os.map(o => (o.id === id ? { ...o, status } : o)));
     showToast(`Order ${status.toLowerCase()}`);
     
-    // Send SMS notifications on status changes when customer consented
-    if (order?.phone && order?.sms_consent === true && (status === "Confirmed" || status === "Completed")) {
+    // Send SMS notifications on status changes when customer consented and
+    // the shop's plan actually includes SMS (Growth Partner+).
+    if (planHasFeature(plan, "SMS notifications") && order?.phone && order?.sms_consent === true && (status === "Confirmed" || status === "Completed")) {
       let smsMessage = "";
       if (status === "Confirmed") {
         smsMessage = `Your tire order at ${shopName || "our shop"} has been confirmed! We'll see you soon. Reply STOP to unsubscribe.`;
@@ -2330,7 +2355,7 @@ function AppointmentsPage({ shopId, showToast }) {
   </div>;
 }
 
-function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
+function MobileJobsPage({ shopId, shopName, shopPhone, plan, showToast }) {
   const isMobile = useWindowWidth() < 768;
   const [loading, setLoading] = useState(true);
   const [allJobs, setAllJobs] = useState([]);
@@ -2388,6 +2413,7 @@ function MobileJobsPage({ shopId, shopName, shopPhone, showToast }) {
       return;
     }
     setAllJobs(current => current.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
+    if (!planHasFeature(plan, "SMS notifications")) return;
     if (newStatus === "En Route") {
       await sendSms(job.customerPhone, `Your TreadFlow mobile tire tech is on the way! Expected arrival: ${job.mobileTimeSlot}. Call us at ${shopPhone} with any questions.`);
     }
@@ -4145,6 +4171,7 @@ export async function storefrontSubmitReservation(shopId, {
   mobileDate = "",
   notes = "",
   status = "pending",
+  plan = null,
 }) {
   if (!shopId) throw new Error("Missing shop.");
   const qty = Math.max(1, Math.min(99, parseInt(String(quantity), 10) || 1));
@@ -4200,7 +4227,8 @@ export async function storefrontSubmitReservation(shopId, {
   if (orderErr) throw orderErr;
   
   // Send SMS to shop owner about new reservation when consent is provided
-  if (ownerPhone && smsConsent === true) {
+  // and the shop's plan actually includes SMS (Growth Partner+).
+  if (ownerPhone && smsConsent === true && planHasFeature(plan, "SMS notifications")) {
     const tireName = `${orderTire.brand} ${orderTire.model}`;
     await sendSms(ownerPhone, `New tire reservation from ${name} for ${tireName}. Check your TreadFlow dashboard.`);
   }
@@ -4225,6 +4253,7 @@ function Storefront({ nav, initialTireSlug }) {
     hero_video_url: "",
     storefront_sections: {},
     deposit_amount: 50,
+    plan: null,
   });
   const [activePromotion, setActivePromotion] = useState(null);
   const [searchMode, setSearchMode] = useState("size");
@@ -4264,7 +4293,7 @@ function Storefront({ nav, initialTireSlug }) {
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id, name, email, phone, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections, deposit_amount")
+      .select("id, name, email, phone, plan, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections, deposit_amount")
       .eq("slug", PUBLIC_STOREFRONT_SLUG)
       .maybeSingle()
       .then(({ data }) => {
@@ -4282,6 +4311,7 @@ function Storefront({ nav, initialTireSlug }) {
           hero_video_url: (data.hero_video_url || "").trim(),
           storefront_sections: (data.storefront_sections && typeof data.storefront_sections === "object") ? data.storefront_sections : {},
           deposit_amount: data.deposit_amount ?? 50,
+          plan: data.plan || null,
         });
       });
     return () => { cancelled = true; };
@@ -4332,6 +4362,17 @@ function Storefront({ nav, initialTireSlug }) {
   const [resServiceAddress, setResServiceAddress] = useState("");
   const [resMobileTimeSlot, setResMobileTimeSlot] = useState("");
   const [resPayment, setResPayment] = useState("deposit");
+  // publicShopInfo.plan starts null until the shop lookup resolves — treat
+  // that as "still loading", not "no online payments", so the default
+  // selection doesn't flash to "Pay at shop" for shops that do support it.
+  const canPayOnline = publicShopInfo.plan == null || planHasFeature(publicShopInfo.plan, "Online deposits/payments");
+
+  // Online deposits/payments is a Growth Partner+ feature — once we know the
+  // shop's actual plan doesn't include it, fall back to "pay at shop"
+  // instead of leaving the selection on an option that's no longer offered.
+  useEffect(() => {
+    if (publicShopInfo.plan != null && !canPayOnline && resPayment !== "shop") setResPayment("shop");
+  }, [publicShopInfo.plan, canPayOnline, resPayment]);
   const [resNotes, setResNotes] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
   const [mobileTimeSlots, setMobileTimeSlots] = useState([]);
@@ -4657,8 +4698,8 @@ function Storefront({ nav, initialTireSlug }) {
             <div style={{ gridColumn: "1/-1" }}>
               <label style={S.label}>Payment Option</label>
               <select style={{ ...S.select, width: "100%" }} value={resPayment} onChange={e => setResPayment(e.target.value)}>
-                <option value="deposit">{`Pay deposit online ($${Number(publicShopInfo.deposit_amount || 50).toFixed(0)})`}</option>
-                <option value="full">Pay in full online</option>
+                {canPayOnline && <option value="deposit">{`Pay deposit online ($${Number(publicShopInfo.deposit_amount || 50).toFixed(0)})`}</option>}
+                {canPayOnline && <option value="full">Pay in full online</option>}
                 <option value="shop">Pay at shop</option>
               </select>
             </div>
@@ -4742,6 +4783,7 @@ function Storefront({ nav, initialTireSlug }) {
                   mobileDate: resDate,
                   notes: resNotes,
                   status: onlinePaymentMode ? "Awaiting Payment" : "pending",
+                  plan: publicShopInfo.plan,
                 });
                 setSavedOrderId(id);
                 const tireName = `${orderTire.brand} ${orderTire.model}`;
