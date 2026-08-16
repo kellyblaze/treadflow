@@ -17,6 +17,7 @@ the file in sync with reality rather than letting it drift.
 | Supabase project | ref `uuivxrphoviaqehhpxdy`, org `mhwkxpyazswbrylzrxpb`, region us-east-2, under account `info@treadflow.cc` — **always confirm with `list_projects` before running any migration**; a differently-named project ("EverBranch") has shown up connected in this environment before. |
 | Platform admin | `kellyblazeent@gmail.com` is the first (and currently only) `platform_admins` row, granted via manual SQL after self-registering through the real signup flow. |
 | Migrations | Every file in `supabase/migrations/` has been applied to the live project, through `20260720000010_shop_owner_invite_acceptance.sql`. Apply new ones with the Supabase MCP `apply_migration` tool, not raw `psql`. |
+| Demo shop | `Greenville Tire Pros` (slug `greenville-tire-pros`), plan Market Leader, `shops.user_id` set to the platform admin's own auth id — so `kellyblazeent@gmail.com` owns both Super Admin and this shop. Seeded directly via SQL (10 tires, 4 customers, 6 orders, 4 appointments, 3 promotions, 2 invoices, 1 invited staff row) for manual QA. Not part of any migration — pure data, safe to delete/reseed. |
 
 ## What's actually built vs. what just looks built
 
@@ -53,6 +54,23 @@ tiers — confirmed status of the ones that were in doubt:
   when it can't match an existing `shops` row). Confirmed unintended
   with the user; "Get Started" now routes to the invite-application
   form instead of Stripe Checkout. See change log.
+- ✅ Fixed (as of this session): **public storefront URL routing** —
+  discovered while seeding the demo shop. `Storefront` always fetched the
+  shop hardcoded to slug `"greenville-tire-pros"` regardless of the URL,
+  and the initial-page-routing regex required a trailing tire slug, so a
+  bare `/shop/{slug}` link didn't even reach the storefront page. Every
+  shop's public storefront resolved to whichever shop happened to have
+  that exact slug — real multi-tenant routing by slug didn't exist.
+  Fixed: the URL regex now makes the tire segment optional, the resolved
+  slug flows into `<Storefront shopSlug>` and its Supabase query, and
+  internal "preview my storefront" links (dashboard sidebar, mobile nav,
+  Super Admin's shop list) now pass the real shop's slug through a new
+  `nav(page, { shopSlug })` option instead of relying on the hardcoded
+  default. Shop Settings' QR code/print view was also pointing at the
+  bare homepage regardless of shop — now builds `{SHOP_PUBLIC_URL}/shop/
+  {slug}` from the real slug. `PUBLIC_STOREFRONT_SLUG` stays as a
+  last-resort fallback only. Build clean, lint baseline improved (35 vs
+  the prior 36), all 54 tests pass.
 - ⚠️ Real Stripe Price IDs for the 3 plans (`STRIPE_PRICE_EARLY_PARTNER`
   etc.) — still not reconfirmed; this session couldn't check either (no
   Vercel/Stripe credentials in this environment — `vercel whoami` logs
@@ -82,6 +100,51 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-16 — Fixed public storefront URL routing
+Discovered while seeding the demo shop (see below): `Storefront`
+(`src/App.jsx`) always queried `shops` by the hardcoded slug
+`"greenville-tire-pros"`, ignoring whatever was actually in the URL, and
+the top-level routing regex (`/^\/shop\/([^/]+)\/([^/]+)\/?$/`) required a
+trailing tire-slug segment, so a bare `/shop/{slug}` link didn't even
+resolve to the storefront page — it fell through to the marketing
+homepage. Net effect: real multi-tenant storefront routing by slug never
+existed; every shop's public storefront showed whichever shop happened to
+have that one hardcoded slug. Fix: made the tire segment in the routing
+regex optional and capture the shop slug separately; threaded that slug
+(or an explicit override) into `<Storefront shopSlug>` and its Supabase
+query; extended `nav()` to accept a `{ shopSlug }` option and updated the
+three internal "preview my storefront" call sites (dashboard sidebar,
+mobile bottom nav, Super Admin's shop list "View") to pass the real
+shop's slug instead of relying on the hardcoded default; fixed Shop
+Settings' QR code/print view, which was pointing at the bare homepage
+regardless of which shop it belonged to, to build the real
+`{SHOP_PUBLIC_URL}/shop/{slug}` URL. `PUBLIC_STOREFRONT_SLUG` remains only
+as a last-resort fallback when no slug is available at all. Build clean,
+lint baseline improved (35 vs. the prior 36), all 54 tests pass. Not yet
+merged to `main` (open on `claude/next-build-tasks-bypuec`, no PR opened
+per instructions not to open one unless asked).
+
+### 2026-08-16 — Seeded a live demo shop for manual QA
+At the user's request, created a fully-populated demo shop directly in
+the live Supabase project (confirmed correct project via `list_projects`
+first, per standing instructions) so the app could be tested end-to-end
+without the credential/payment restrictions of this environment blocking
+it. `shops.user_id` was set to the platform admin's own auth id
+(`kellyblazeent@gmail.com`), so that one login now reaches both Super
+Admin and a real Shop Dashboard — no separate signup needed. Seeded
+"Greenville Tire Pros" on the Market Leader plan (so every gated feature
+is visible) with 10 tires, 4 customers, 6 orders, 4 appointments, 3
+promotions, 2 invoices, and 1 invited staff row, covering a spread of
+statuses (pending/confirmed/completed/cancelled orders, a mobile-service
+order, an expired promotion, low-stock and out-of-stock tires, an
+appointment with no linked order) so most UI states have real data to
+render against. Chose the slug `greenville-tire-pros` specifically
+because it's what the storefront's data fetch was hardcoded to look up
+at the time — which is what surfaced the routing bug fixed right after,
+see above. Delivered the user a full QA checklist as a published
+artifact, organized by app area, covering the public site, storefront,
+full shop dashboard, and Super Admin.
 
 ### 2026-08-15 — Disabled the landing-page checkout bypass
 Re-investigated the "landing-page checkout bypasses invite funnel" item
