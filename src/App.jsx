@@ -15,6 +15,8 @@ import {
   buildTireInsertPayload,
   buildWaitlistPayload,
   parseVehicleFields,
+  STOREFRONT_THEMES,
+  STOREFRONT_THEME_ORDER,
 } from "./helpers";
 const sendSms = async (to, message) => {
   try {
@@ -3612,6 +3614,8 @@ function ShopSettings({ shopId, shopSlug, showToast }) {
   const [savingGoogleReviewUrl, setSavingGoogleReviewUrl] = useState(false);
   const [depositAmount, setDepositAmount] = useState(50);
   const [savingDepositAmount, setSavingDepositAmount] = useState(false);
+  const [storefrontTheme, setStorefrontTheme] = useState("classic");
+  const [savingStorefrontTheme, setSavingStorefrontTheme] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -3619,7 +3623,7 @@ function ShopSettings({ shopId, shopSlug, showToast }) {
     (async () => {
       const { data, error } = await supabase
         .from("shops")
-        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections, google_review_url, deposit_amount")
+        .select("mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, gallery_images, storefront_sections, google_review_url, deposit_amount, storefront_theme")
         .eq("id", shopId)
         .maybeSingle();
       if (cancelled) return;
@@ -3640,9 +3644,26 @@ function ShopSettings({ shopId, shopSlug, showToast }) {
       }
       setGoogleReviewUrl(data.google_review_url || "");
       setDepositAmount(data.deposit_amount ?? 50);
+      setStorefrontTheme(data.storefront_theme && STOREFRONT_THEMES[data.storefront_theme] ? data.storefront_theme : "classic");
     })();
     return () => { cancelled = true; };
   }, [shopId, showToast]);
+
+  const saveStorefrontTheme = async (nextTheme) => {
+    if (!shopId) return;
+    setStorefrontTheme(nextTheme);
+    setSavingStorefrontTheme(true);
+    const { error } = await supabase
+      .from("shops")
+      .update({ storefront_theme: nextTheme })
+      .eq("id", shopId);
+    setSavingStorefrontTheme(false);
+    if (error) {
+      showToast(error.message || "Unable to save storefront theme.");
+      return;
+    }
+    showToast(`Storefront theme set to ${STOREFRONT_THEMES[nextTheme].label}.`);
+  };
 
   const saveDepositAmount = async () => {
     if (!shopId) return;
@@ -3959,6 +3980,37 @@ function ShopSettings({ shopId, shopSlug, showToast }) {
         <button onClick={saveStorefrontSections} disabled={savingStorefrontSections} style={S.btn("primary")}>{savingStorefrontSections ? "Saving…" : "Save Storefront Sections"}</button>
       </div>
       <div style={S.card}>
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Storefront Theme</div>
+        <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 16 }}>Pick a visual identity for your public storefront. Changes apply the moment you select one — everything else about your storefront (inventory, orders, checkout) works exactly the same.</div>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 10 }}>
+          {STOREFRONT_THEME_ORDER.map(key => {
+            const t = STOREFRONT_THEMES[key];
+            const active = storefrontTheme === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => saveStorefrontTheme(key)}
+                disabled={savingStorefrontTheme}
+                style={{
+                  textAlign: "left", cursor: savingStorefrontTheme ? "default" : "pointer", padding: "12px 14px", borderRadius: 10,
+                  border: `2px solid ${active ? t.accent : COLORS.gray200}`, background: active ? `${t.accent}14` : "#fff",
+                  display: "flex", flexDirection: "column", gap: 6, fontFamily: "inherit",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 14, height: 14, borderRadius: "50%", background: t.accent, flexShrink: 0, border: `1px solid ${COLORS.gray300}` }} />
+                  <span style={{ fontWeight: 700, fontSize: 13.5, color: COLORS.gray900 }}>{t.label}</span>
+                  {active && <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.04, textTransform: "uppercase", color: t.accent }}>Active</span>}
+                </div>
+                <div style={{ fontSize: 12, color: COLORS.gray500, lineHeight: 1.4 }}>{t.blurb}</div>
+              </button>
+            );
+          })}
+        </div>
+        {savingStorefrontTheme && <div style={{ fontSize: 12, color: COLORS.gray500, marginTop: 10 }}>Saving…</div>}
+      </div>
+      <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>QR Code</div>
         <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 14 }}>Put this on receipts, business cards, your shop window, or anywhere customers can scan it to find your tires online</div>
         <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicShopUrl)}`} alt="Shop storefront QR code" style={{ width: 200, height: 200, display: "block", border: `1px solid ${COLORS.gray200}`, borderRadius: 10, marginBottom: 14 }} />
@@ -4236,6 +4288,7 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
     storefront_sections: {},
     deposit_amount: 50,
     plan: null,
+    storefront_theme: "classic",
   });
   const [activePromotion, setActivePromotion] = useState(null);
   const [searchMode, setSearchMode] = useState("size");
@@ -4275,7 +4328,7 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
     let cancelled = false;
     supabase
       .from("shops")
-      .select("id, name, email, phone, plan, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections, deposit_amount")
+      .select("id, name, email, phone, plan, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections, deposit_amount, storefront_theme")
       .eq("slug", shopSlug)
       .maybeSingle()
       .then(({ data }) => {
@@ -4294,6 +4347,7 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
           storefront_sections: (data.storefront_sections && typeof data.storefront_sections === "object") ? data.storefront_sections : {},
           deposit_amount: data.deposit_amount ?? 50,
           plan: data.plan || null,
+          storefront_theme: data.storefront_theme && STOREFRONT_THEMES[data.storefront_theme] ? data.storefront_theme : "classic",
         });
       });
     return () => { cancelled = true; };
@@ -4433,6 +4487,14 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
   const trackedHomeViewRef = useRef(false);
   const trackedTireViewsRef = useRef(new Set());
 
+  // The shop's chosen storefront look (Shop Settings > Storefront Theme).
+  // `T` shadows the app-wide COLORS constant for the rest of this component,
+  // so every existing color reference below resolves through the theme —
+  // "classic" is defined to match COLORS exactly, so shops that never pick a
+  // theme see the same storefront they always have.
+  const theme = STOREFRONT_THEMES[publicShopInfo.storefront_theme] || STOREFRONT_THEMES.classic;
+  const T = theme.colors;
+
   const filtered = mockTires.filter(t => {
     if ((t.status !== "Active" && Number(t.qty) !== 0) || (condFilter !== "All" && t.condition !== condFilter)) return false;
     if (searchMode === "vehicle") {
@@ -4519,16 +4581,16 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
 
   const waitlistModal = waitlistTire && (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 20 }}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 420 }}>
+      <div style={{ background: T.white, borderRadius: 14, padding: 24, width: "100%", maxWidth: 420 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Get Notified When Available</h2>
-          <button onClick={() => setWaitlistTire(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.gray400 }}>×</button>
+          <button onClick={() => setWaitlistTire(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: T.gray400 }}>×</button>
         </div>
-        <div style={{ fontWeight: 700, color: COLORS.navy, marginBottom: 14 }}>{waitlistTire.brand} {waitlistTire.model} {waitlistTire.size}</div>
+        <div style={{ fontWeight: 700, color: T.navy, marginBottom: 14 }}>{waitlistTire.brand} {waitlistTire.model} {waitlistTire.size}</div>
         <label style={S.label}>Email</label>
         <input type="email" value={waitlistEmail} onChange={e => setWaitlistEmail(e.target.value)} style={{ ...S.input, marginBottom: 14 }} placeholder="you@example.com" />
         <button onClick={submitWaitlist} disabled={waitlistSubmitting} style={{ ...S.btn("orange"), width: "100%", justifyContent: "center" }}>{waitlistSubmitting ? "Submitting..." : "Submit"}</button>
-        {waitlistSuccess && <div style={{ fontSize: 13, color: waitlistSuccess.startsWith("We will") ? COLORS.green : COLORS.red, marginTop: 12 }}>{waitlistSuccess}</div>}
+        {waitlistSuccess && <div style={{ fontSize: 13, color: waitlistSuccess.startsWith("We will") ? T.green : T.red, marginTop: 12 }}>{waitlistSuccess}</div>}
       </div>
     </div>
   );
@@ -4537,23 +4599,23 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
   const shareName = shareTire ? `${shareTire.brand} ${shareTire.model} ${shareTire.size}` : "";
   const shareModal = shareTire && (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 20 }}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 480 }}>
+      <div style={{ background: T.white, borderRadius: 14, padding: 24, width: "100%", maxWidth: 480 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Share Tire</h2>
-          <button onClick={() => setShareTire(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.gray400 }}>×</button>
+          <button onClick={() => setShareTire(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: T.gray400 }}>×</button>
         </div>
-        <div style={{ background: COLORS.navy, color: "#fff", borderRadius: 12, padding: 20, minHeight: 210, display: "flex", flexDirection: "column", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ background: T.navy, color: "#fff", borderRadius: 12, padding: 20, minHeight: 210, display: "flex", flexDirection: "column", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 8, background: COLORS.orange, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900 }}>{(publicShopInfo.name || storefront.name).charAt(0)}</div>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: T.orange, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900 }}>{(publicShopInfo.name || storefront.name).charAt(0)}</div>
             <div style={{ fontWeight: 800 }}>{publicShopInfo.name || storefront.name}</div>
           </div>
           <div>
             <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.1 }}>{shareTire.brand} {shareTire.model}</div>
-            <div style={{ color: "#CBD5E1", marginTop: 4 }}>{shareTire.size} • {shareTire.condition}</div>
+            <div style={{ color: T.gray300, marginTop: 4 }}>{shareTire.size} • {shareTire.condition}</div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end" }}>
-            <div style={{ color: COLORS.orange, fontSize: 30, fontWeight: 900 }}>${shareTire.price}</div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#CBD5E1" }}>TreadFlow</div>
+            <div style={{ color: T.orange, fontSize: 30, fontWeight: 900 }}>${shareTire.price}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: T.gray300 }}>TreadFlow</div>
           </div>
         </div>
         <div style={{ display: "grid", gap: 10 }}>
@@ -4566,15 +4628,15 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
   );
 
   if (orderDone) return (
-    <div style={{ minHeight: "100vh", background: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ background: "#fff", borderRadius: 20, padding: "60px 48px", textAlign: "center", maxWidth: 480 }}>
+    <div style={{ minHeight: "100vh", background: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: theme.fontBody }}>
+      <div style={{ background: T.white, borderRadius: 20, padding: "60px 48px", textAlign: "center", maxWidth: 480 }}>
         <div style={{ fontSize: 56, marginBottom: 16 }}>✅</div>
-        <h2 style={{ fontSize: 28, fontWeight: 800, color: COLORS.gray900, marginBottom: 12 }}>Reservation Confirmed!</h2>
-        <p style={{ color: COLORS.gray500, fontSize: 16, lineHeight: 1.7, marginBottom: 24 }}>We've received your tire reservation. You'll get a confirmation email shortly. Our team will follow up to confirm your installation appointment.</p>
-        <div style={{ background: COLORS.gray50, borderRadius: 12, padding: "16px 20px", fontSize: 14, color: COLORS.gray600, marginBottom: 24 }}>
+        <h2 style={{ fontSize: 28, fontWeight: 800, color: T.gray900, marginBottom: 12 }}>Reservation Confirmed!</h2>
+        <p style={{ color: T.gray500, fontSize: 16, lineHeight: 1.7, marginBottom: 24 }}>We've received your tire reservation. You'll get a confirmation email shortly. Our team will follow up to confirm your installation appointment.</p>
+        <div style={{ background: T.gray50, borderRadius: 12, padding: "16px 20px", fontSize: 14, color: T.gray600, marginBottom: 24 }}>
           <div><strong>{orderTire?.brand} {orderTire?.model}</strong></div>
           <div>{orderTire?.size} · {orderTire?.condition}</div>
-          {savedOrderId != null && <div style={{ marginTop: 8, color: COLORS.green, fontWeight: 700 }}>Order ID: {String(savedOrderId)}</div>}
+          {savedOrderId != null && <div style={{ marginTop: 8, color: T.green, fontWeight: 700 }}>Order ID: {String(savedOrderId)}</div>}
         </div>
         <button onClick={() => { setOrderDone(false); setSelectedTire(null); setShowOrder(false); setSavedOrderId(null); setOrderError(""); }} style={{ ...S.btn("primary", "lg"), width: "100%", justifyContent: "center" }}>Back to Store</button>
       </div>
@@ -4582,8 +4644,8 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
   );
 
   if (showOrder && orderTire) return (
-    <div style={{ minHeight: "100vh", background: COLORS.gray50, fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ background: storefront.primaryColor, padding: "14px 32px", display: "flex", alignItems: "center", gap: 12 }}>
+    <div style={{ minHeight: "100vh", background: T.gray50, fontFamily: theme.fontBody }}>
+      <div style={{ background: theme.accent, padding: "14px 32px", display: "flex", alignItems: "center", gap: 12 }}>
         <button onClick={() => { setShowOrder(false); setOrderError(""); }} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 14 }}>←</button>
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>{storefront.name}</span>
       </div>
@@ -4593,8 +4655,8 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
           <div style={{ fontSize: 36 }}>🛞</div>
           <div>
             <div style={{ fontWeight: 700 }}>{orderTire.brand} {orderTire.model}</div>
-            <div style={{ fontSize: 14, color: COLORS.gray500 }}>{orderTire.size} · {orderTire.condition}</div>
-            <div style={{ fontWeight: 800, color: COLORS.blue, fontSize: 18 }}>${orderTire.price}/tire</div>
+            <div style={{ fontSize: 14, color: T.gray500 }}>{orderTire.size} · {orderTire.condition}</div>
+            <div style={{ fontWeight: 800, color: T.blue, fontSize: 18 }}>${orderTire.price}/tire</div>
           </div>
         </div>
         <div style={S.card}>
@@ -4656,7 +4718,7 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
                     })}
                   </select>
                 </div>
-                <div style={{ gridColumn: "1/-1", color: COLORS.gray500, fontSize: 13 }}>
+                <div style={{ gridColumn: "1/-1", color: T.gray500, fontSize: 13 }}>
                   Our technician will call 30 minutes before arrival. Jobs are scheduled 90 minutes apart minimum.
                 </div>
               </>
@@ -4679,15 +4741,15 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
                 id="smsConsent"
                 checked={smsConsent}
                 onChange={e => setSmsConsent(e.target.checked)}
-                style={{ marginTop: 3, accentColor: COLORS.blue, width: 16, height: 16, flexShrink: 0 }}
+                style={{ marginTop: 3, accentColor: T.blue, width: 16, height: 16, flexShrink: 0 }}
               />
-              <label htmlFor="smsConsent" style={{ fontSize: 13, color: COLORS.gray600, lineHeight: 1.5, cursor: "pointer" }}>
-                I agree to receive text message updates about my order from this shop. Message and data rates may apply. Reply STOP to unsubscribe. <a href="/sms-terms" target="_blank" style={{ color: COLORS.blue }}>SMS Terms</a>
+              <label htmlFor="smsConsent" style={{ fontSize: 13, color: T.gray600, lineHeight: 1.5, cursor: "pointer" }}>
+                I agree to receive text message updates about my order from this shop. Message and data rates may apply. Reply STOP to unsubscribe. <a href="/sms-terms" target="_blank" style={{ color: T.blue }}>SMS Terms</a>
               </label>
             </div>
           </div>
           {orderError ? (
-            <div style={{ marginTop: 14, padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: COLORS.red, fontSize: 14 }}>
+            <div style={{ marginTop: 14, padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: T.red, fontSize: 14 }}>
               {orderError}
             </div>
           ) : null}
@@ -4806,8 +4868,8 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
   );
 
   if (selectedTire) return (
-    <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ background: storefront.primaryColor, padding: "14px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div style={{ minHeight: "100vh", background: T.white, fontFamily: theme.fontBody }}>
+      <div style={{ background: theme.accent, padding: "14px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => setSelectedTire(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 14 }}>←</button>
           <span style={{ color: "#fff", fontWeight: 700 }}>{storefront.name}</span>
@@ -4816,21 +4878,21 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
       </div>
       <div style={{ maxWidth: 900, margin: "32px auto", padding: "0 20px", display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 32 }}>
         <div>
-          <div style={{ background: COLORS.gray100, borderRadius: 16, height: 300, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 80, marginBottom: 16 }}>🛞</div>
+          <div style={{ background: T.gray100, borderRadius: 16, height: 300, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 80, marginBottom: 16 }}>🛞</div>
         </div>
         <div>
           <span style={S.badge(selectedTire.condition)}>{selectedTire.condition}</span>
           <h1 style={{ fontSize: 30, fontWeight: 800, margin: "10px 0 4px" }}>{selectedTire.brand} {selectedTire.model}</h1>
-          <div style={{ fontSize: 18, color: COLORS.gray500, marginBottom: 20 }}>{selectedTire.size}</div>
-          <div style={{ fontSize: 36, fontWeight: 800, color: COLORS.blue }}>${selectedTire.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/tire</span></div>
-          {selectedTire.setPrice && <div style={{ fontSize: 18, color: COLORS.green, fontWeight: 700 }}>Set of 4: ${selectedTire.setPrice}</div>}
+          <div style={{ fontSize: 18, color: T.gray500, marginBottom: 20 }}>{selectedTire.size}</div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: T.blue }}>${selectedTire.price}<span style={{ fontSize: 16, fontWeight: 400, color: T.gray400 }}>/tire</span></div>
+          {selectedTire.setPrice && <div style={{ fontSize: 18, color: T.green, fontWeight: 700 }}>Set of 4: ${selectedTire.setPrice}</div>}
           <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 10, margin: "20px 0" }}>
-            {[["In Stock", selectedTire.qty + " available"], selectedTire.tread ? ["Tread Depth", selectedTire.tread] : ["DOT Date", selectedTire.dot], ["Load Index", selectedTire.load], ["Speed Rating", selectedTire.speed], ["Type", selectedTire.type], ["Install Fee", "$" + selectedTire.installFee]].map(([k, v]) => <div key={k} style={{ background: COLORS.gray50, borderRadius: 8, padding: "8px 12px" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.gray400 }}>{k}</div>
+            {[["In Stock", selectedTire.qty + " available"], selectedTire.tread ? ["Tread Depth", selectedTire.tread] : ["DOT Date", selectedTire.dot], ["Load Index", selectedTire.load], ["Speed Rating", selectedTire.speed], ["Type", selectedTire.type], ["Install Fee", "$" + selectedTire.installFee]].map(([k, v]) => <div key={k} style={{ background: T.gray50, borderRadius: 8, padding: "8px 12px" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.gray400 }}>{k}</div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>{v}</div>
             </div>)}
           </div>
-          <p style={{ fontSize: 14, color: COLORS.gray600, lineHeight: 1.7, marginBottom: 20 }}>{selectedTire.desc}</p>
+          <p style={{ fontSize: 14, color: T.gray600, lineHeight: 1.7, marginBottom: 20 }}>{selectedTire.desc}</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {selectedTire.qty === 0 ? (
               <button onClick={() => openWaitlist(selectedTire)} style={{ ...S.btn("orange", "lg"), justifyContent: "center", fontWeight: 700, ...(isMobile ? { width: "100%" } : {}) }}>Notify Me When Available</button>
@@ -4849,9 +4911,9 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
   );
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#fff", position: "relative" }}>
+    <div style={{ minHeight: "100vh", fontFamily: theme.fontBody, background: T.white, position: "relative" }}>
       {/* Sticky Header */}
-      <div style={{ background: storefront.primaryColor, padding: "14px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 50 }}>
+      <div style={{ background: theme.accent, padding: "14px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 32, height: 32, background: "rgba(255,255,255,0.2)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800 }}>G</div>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 17 }}>{storefront.name}</span>
@@ -4862,18 +4924,18 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
         </div>
       </div>
       {/* Announcement Bar */}
-      <div style={{ background: COLORS.orange, padding: "8px 32px", textAlign: "center", fontSize: 14, color: "#fff", fontWeight: 600 }}>
+      <div style={{ background: T.orange, padding: "8px 32px", textAlign: "center", fontSize: 14, color: "#fff", fontWeight: 600 }}>
         🏷️ Free installation on any set of 4 tires — Limited time offer!
       </div>
       {activePromotion && (
-        <div style={{ padding: "14px 24px", background: "#F8FAFC", borderBottom: `1px solid ${COLORS.gray200}`, color: COLORS.gray900, display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: "center", justifyContent: "center", gap: 12, fontSize: 14 }}>
+        <div style={{ padding: "14px 24px", background: T.gray50, borderBottom: `1px solid ${T.gray200}`, color: T.gray900, display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: "center", justifyContent: "center", gap: 12, fontSize: 14 }}>
           <span style={{ fontWeight: 700 }}>{activePromotion.title}</span>
           <span>{activePromotion.discount_type === "percentage" ? `${activePromotion.discount_value}% off` : `$${activePromotion.discount_value} off`}</span>
           {activePromotion.promo_code ? <span style={{ fontWeight: 700 }}>Use code {activePromotion.promo_code} for {activePromotion.discount_type === "percentage" ? `${activePromotion.discount_value}% off` : `$${activePromotion.discount_value} off`}</span> : null}
         </div>
       )}
       {/* Hero with Video Background */}
-      <div style={{ background: storefront.heroBg, padding: "80px 40px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+      <div style={{ background: theme.heroBg, padding: "80px 40px", textAlign: "center", position: "relative", overflow: "hidden" }}>
         {heroVideoEnabled && (
           <video autoPlay loop muted playsInline style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.3 }}>
             <source src={heroVideoUrl} type={heroVideoType} />
@@ -4885,26 +4947,26 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
           <p style={{ fontSize: 18, color: "rgba(255,255,255,0.65)", maxWidth: 540, margin: "0 auto 32px", lineHeight: 1.6 }}>{storefront.heroSub}</p>
           <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: isMobile ? "wrap" : "nowrap", marginBottom: 16 }}>
             {[["size","Search by Size"], ["vehicle","Search by Vehicle"]].map(([mode, label]) => (
-              <button key={mode} onClick={() => setSearchMode(mode)} style={{ padding: "10px 18px", borderRadius: 999, border: searchMode === mode ? `1px solid ${COLORS.white}` : `1px solid rgba(255,255,255,0.5)`, background: searchMode === mode ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff", cursor: "pointer", fontWeight: 700, minWidth: 150 }}>
+              <button key={mode} onClick={() => setSearchMode(mode)} style={{ padding: "10px 18px", borderRadius: 999, border: searchMode === mode ? `1px solid ${T.white}` : `1px solid rgba(255,255,255,0.5)`, background: searchMode === mode ? "rgba(255,255,255,0.2)" : "transparent", color: "#fff", cursor: "pointer", fontWeight: 700, minWidth: 150 }}>
                 {label}
               </button>
             ))}
           </div>
           {searchMode === "vehicle" && (
             <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, minmax(140px, 1fr))", isMobile), gap: 12, justifyContent: "center", maxWidth: 780, margin: "0 auto 18px", width: isMobile ? "100%" : undefined }}>
-              <select value={vehicleYear} onChange={e => setVehicleYear(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+              <select value={vehicleYear} onChange={e => setVehicleYear(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.gray300}`, fontSize: 14 }}>
                 {vehicleYears.map(year => <option key={year} value={year}>{year}</option>)}
               </select>
-              <select value={vehicleMake} onChange={e => { const make = e.target.value; setVehicleMake(make); const nextModels = vehicleModelsByMake[make] || []; setVehicleModel(nextModels[0] || ""); }} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+              <select value={vehicleMake} onChange={e => { const make = e.target.value; setVehicleMake(make); const nextModels = vehicleModelsByMake[make] || []; setVehicleModel(nextModels[0] || ""); }} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.gray300}`, fontSize: 14 }}>
                 {vehicleMakes.map(make => <option key={make} value={make}>{make}</option>)}
               </select>
-              <select value={vehicleModel} onChange={e => setVehicleModel(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #CBD5E1", fontSize: 14 }}>
+              <select value={vehicleModel} onChange={e => setVehicleModel(e.target.value)} style={{ ...S.input, width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.gray300}`, fontSize: 14 }}>
                 {vehicleModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
               </select>
             </div>
           )}
           <div style={{ display: "flex", gap: 12, justifyContent: "center", maxWidth: 520, margin: "0 auto", background: "rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, flexDirection: isMobile ? "column" : "row", width: isMobile ? "100%" : undefined, boxSizing: "border-box" }}>
-            <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: "#fff", boxSizing: "border-box" }} placeholder={searchMode === "vehicle" ? `Search tires for ${vehicleYear} ${vehicleMake} ${vehicleModel}` : "Search by size, brand, or model (e.g. 225/55R17)..."} value={search} onChange={e => setSearch(e.target.value)} />
+            <input style={{ ...S.input, flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, background: T.white, boxSizing: "border-box" }} placeholder={searchMode === "vehicle" ? `Search tires for ${vehicleYear} ${vehicleMake} ${vehicleModel}` : "Search by size, brand, or model (e.g. 225/55R17)..."} value={search} onChange={e => setSearch(e.target.value)} />
             <button style={{ ...S.btn("orange"), fontWeight: 700, whiteSpace: "nowrap", ...(isMobile ? { width: "100%", justifyContent: "center" } : {}) }}>{searchMode === "vehicle" ? "Search by Vehicle" : "Search Tires"}</button>
           </div>
           <div style={{ display: "flex", gap: 20, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
@@ -4913,38 +4975,38 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
         </div>
       </div>
       {/* Trust Badges */}
-      <div style={{ background: "#fff", borderBottom: `1px solid ${COLORS.gray200}`, padding: "8px 16px", maxHeight: 40, overflowX: "auto", overflowY: "hidden" }}>
+      <div style={{ background: T.white, borderBottom: `1px solid ${T.gray200}`, padding: "8px 16px", maxHeight: 40, overflowX: "auto", overflowY: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: isMobile ? "flex-start" : "center", gap: 10, maxWidth: 900, margin: "0 auto", minWidth: "max-content" }}>
-          {[["✅","Licensed & Insured"],["⭐","5-Star Rated"],["⚡","Same Day Service"],["🔧","Expert Installation"]].map(([icon, title]) => <div key={title} style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.gray50, borderRadius: 8, padding: "3px 8px", whiteSpace: "nowrap", height: 22 }}>
+          {[["✅","Licensed & Insured"],["⭐","5-Star Rated"],["⚡","Same Day Service"],["🔧","Expert Installation"]].map(([icon, title]) => <div key={title} style={{ display: "flex", alignItems: "center", gap: 5, background: T.gray50, borderRadius: 8, padding: "3px 8px", whiteSpace: "nowrap", height: 22 }}>
             <div style={{ fontSize: 13, lineHeight: 1 }}>{icon}</div>
-            <div style={{ fontWeight: 700, fontSize: 12, color: COLORS.navy, lineHeight: 1 }}>{title}</div>
+            <div style={{ fontWeight: 700, fontSize: 12, color: T.navy, lineHeight: 1 }}>{title}</div>
           </div>)}
         </div>
       </div>
       {/* Tire Size Finder Modal */}
       {showTireSizeFinder && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 480, width: "100%" }}>
+          <div style={{ background: T.white, borderRadius: 16, padding: 32, maxWidth: 480, width: "100%" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Find Your Tire Size</h2>
-              <button onClick={() => setShowTireSizeFinder(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.gray400 }}>×</button>
+              <button onClick={() => setShowTireSizeFinder(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: T.gray400 }}>×</button>
             </div>
-            <div style={{ background: COLORS.gray50, borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>
+            <div style={{ background: T.gray50, borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>
               <svg width="140" height="140" viewBox="0 0 140 140" style={{ margin: "0 auto", display: "block" }}>
-                <circle cx="70" cy="70" r="65" fill="none" stroke="#999" strokeWidth="2" />
-                <circle cx="70" cy="70" r="55" fill="none" stroke="#666" strokeWidth="3" />
-                <text x="50" y="75" fontSize="12" fontWeight="bold" fill="#000">225</text>
-                <text x="82" y="75" fontSize="12" fontWeight="bold" fill="#000">55</text>
-                <text x="105" y="75" fontSize="12" fontWeight="bold" fill="#000">R17</text>
-                <line x1="45" y1="35" x2="45" y2="10" stroke="#1E6FD9" strokeWidth="2" />
-                <text x="15" y="28" fontSize="11" fill="#1E6FD9" fontWeight="bold">Width</text>
-                <line x1="80" y1="20" x2="100" y2="5" stroke="#1E6FD9" strokeWidth="2" />
-                <text x="85" y="8" fontSize="11" fill="#1E6FD9" fontWeight="bold">Ratio</text>
-                <line x1="120" y1="70" x2="135" y2="70" stroke="#1E6FD9" strokeWidth="2" />
-                <text x="115" y="90" fontSize="11" fill="#1E6FD9" fontWeight="bold">Rim</text>
+                <circle cx="70" cy="70" r="65" fill="none" stroke={T.gray400} strokeWidth="2" />
+                <circle cx="70" cy="70" r="55" fill="none" stroke={T.gray600} strokeWidth="3" />
+                <text x="50" y="75" fontSize="12" fontWeight="bold" fill={T.gray900}>225</text>
+                <text x="82" y="75" fontSize="12" fontWeight="bold" fill={T.gray900}>55</text>
+                <text x="105" y="75" fontSize="12" fontWeight="bold" fill={T.gray900}>R17</text>
+                <line x1="45" y1="35" x2="45" y2="10" stroke={theme.accent} strokeWidth="2" />
+                <text x="15" y="28" fontSize="11" fill={theme.accent} fontWeight="bold">Width</text>
+                <line x1="80" y1="20" x2="100" y2="5" stroke={theme.accent} strokeWidth="2" />
+                <text x="85" y="8" fontSize="11" fill={theme.accent} fontWeight="bold">Ratio</text>
+                <line x1="120" y1="70" x2="135" y2="70" stroke={theme.accent} strokeWidth="2" />
+                <text x="115" y="90" fontSize="11" fill={theme.accent} fontWeight="bold">Rim</text>
               </svg>
             </div>
-            <p style={{ fontSize: 14, color: COLORS.gray600, marginBottom: 20, lineHeight: 1.6 }}>Look at the sidewall of your current tire. You'll see a number like <strong>225/55R17</strong>. Enter each part below to find matching tires.</p>
+            <p style={{ fontSize: 14, color: T.gray600, marginBottom: 20, lineHeight: 1.6 }}>Look at the sidewall of your current tire. You'll see a number like <strong>225/55R17</strong>. Enter each part below to find matching tires.</p>
             <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
               <div>
                 <label style={S.label}>Section Width (mm)</label>
@@ -4965,31 +5027,31 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
       )}
 
       {/* Inventory */}
-      <div style={{ padding: "60px 40px", background: COLORS.gray50 }}>
+      <div style={{ padding: "60px 40px", background: T.gray50 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h2 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>Tire Inventory</h2>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setShowTireSizeFinder(true)} style={{ ...S.btn("secondary", "sm"), fontWeight: 700 }}>🔍 Find My Size</button>
-            {["All","New","Used"].map(c => <button key={c} onClick={() => setCondFilter(c)} style={{ padding: "6px 16px", borderRadius: 8, fontSize: 14, cursor: "pointer", border: `1px solid ${condFilter === c ? storefront.primaryColor : COLORS.gray300}`, background: condFilter === c ? storefront.primaryColor : "#fff", color: condFilter === c ? "#fff" : COLORS.gray600 }}>{c}</button>)}
+            {["All","New","Used"].map(c => <button key={c} onClick={() => setCondFilter(c)} style={{ padding: "6px 16px", borderRadius: 8, fontSize: 14, cursor: "pointer", border: `1px solid ${condFilter === c ? theme.accent : T.gray300}`, background: condFilter === c ? theme.accent : T.white, color: condFilter === c ? "#fff" : T.gray600 }}>{c}</button>)}
           </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(auto-fill, minmax(260px, 1fr))", isMobile), gap: 20 }}>
-          {filtered.map(t => <div key={t.id} style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden", cursor: "pointer" }} onClick={() => setSelectedTire(t)}>
-            <div style={{ background: COLORS.gray100, height: 160, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, position: "relative" }}>
+          {filtered.map(t => <div key={t.id} style={{ background: T.white, borderRadius: 14, border: `1px solid ${T.gray200}`, overflow: "hidden", cursor: "pointer" }} onClick={() => setSelectedTire(t)}>
+            <div style={{ background: T.gray100, height: 160, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, position: "relative" }}>
               🛞
-              {t.featured && <div style={{ position: "absolute", top: 10, left: 10, background: COLORS.orange, color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 4 }}>Featured</div>}
+              {t.featured && <div style={{ position: "absolute", top: 10, left: 10, background: T.orange, color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 4 }}>Featured</div>}
               {t.qty === 0 && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>Out of Stock</span></div>}
             </div>
             <div style={{ padding: "14px 16px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
                 <span style={S.badge(t.condition)}>{t.condition}</span>
-                {t.tread && <span style={{ fontSize: 12, color: COLORS.gray400 }}>Tread: {t.tread}</span>}
+                {t.tread && <span style={{ fontSize: 12, color: T.gray400 }}>Tread: {t.tread}</span>}
               </div>
               <div style={{ fontWeight: 700, fontSize: 16, margin: "6px 0 2px" }}>{t.brand} {t.model}</div>
-              <div style={{ fontSize: 14, color: COLORS.gray500, marginBottom: 8 }}>{t.size} · {t.type}</div>
+              <div style={{ fontSize: 14, color: T.gray500, marginBottom: 8 }}>{t.size} · {t.type}</div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: storefront.primaryColor }}>${t.price}</div>
-                <div style={{ fontSize: 13, color: COLORS.gray400 }}>Qty: {t.qty}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: theme.accent }}>${t.price}</div>
+                <div style={{ fontSize: 13, color: T.gray400 }}>Qty: {t.qty}</div>
               </div>
               {t.qty === 0 ? (
                 <button onClick={e => { e.stopPropagation(); openWaitlist(t); }} style={{ ...S.btn("orange"), width: "100%", justifyContent: "center", fontWeight: 700 }}>Notify Me When Available</button>
@@ -5001,18 +5063,18 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
         </div>
       </div>
       {/* Services */}
-      <div style={{ padding: "60px 40px", background: "#fff" }}>
+      <div style={{ padding: "60px 40px", background: T.white }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Our Services</h2>
         <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(auto-fit, minmax(180px, 1fr))", isMobile), gap: 16, maxWidth: 900, margin: "0 auto" }}>
-          {[["🔧","Tire Installation","$25–$35/tire"],["⚖️","Wheel Balancing","$12/wheel"],["🔄","Tire Rotation","$19.99"],["🩹","Flat Repair","$19.99"],["🔩","TPMS Service","$15/sensor"],["🚗","Used Tire Mounting","$15/tire"]].map(([i,s,p]) => <div key={s} style={{ background: COLORS.gray50, borderRadius: 12, padding: "20px 18px", textAlign: "center" }}>
+          {[["🔧","Tire Installation","$25–$35/tire"],["⚖️","Wheel Balancing","$12/wheel"],["🔄","Tire Rotation","$19.99"],["🩹","Flat Repair","$19.99"],["🔩","TPMS Service","$15/sensor"],["🚗","Used Tire Mounting","$15/tire"]].map(([i,s,p]) => <div key={s} style={{ background: T.gray50, borderRadius: 12, padding: "20px 18px", textAlign: "center" }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>{i}</div>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{s}</div>
-            <div style={{ fontSize: 14, color: COLORS.blue, fontWeight: 600 }}>{p}</div>
+            <div style={{ fontSize: 14, color: T.blue, fontWeight: 600 }}>{p}</div>
           </div>)}
         </div>
       </div>
       {/* Photo Gallery */}
-      <div style={{ padding: "60px 40px", background: "#fff" }}>
+      <div style={{ padding: "60px 40px", background: T.white }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Our Work</h2>
         <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)"), gap: 16, maxWidth: 900, margin: "0 auto" }}>
           {galleryImages.map((img, idx) => (
@@ -5035,18 +5097,18 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
         </div>
       )}
       {/* Reviews */}
-      <div style={{ padding: "60px 40px", background: COLORS.gray50 }}>
+      <div style={{ padding: "60px 40px", background: T.gray50 }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Customer Reviews</h2>
         <div style={{ display: "grid", gridTemplateColumns: gridCols("repeat(3, 1fr)", isMobile), gap: 20, maxWidth: 900, margin: "0 auto" }}>
           {[["Terrence H.","⭐⭐⭐⭐⭐","Great prices on used tires. In and out in 45 minutes. Will definitely be back!"],["Angela P.","⭐⭐⭐⭐⭐","Reserved online and they had my tires ready when I arrived. Super easy process."],["Devon C.","⭐⭐⭐⭐⭐","Best used tire shop in Greenville. Honest people and fair pricing."]].map(([n, r, t]) => <div key={n} style={{ ...S.card }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{n}</div>
             <div style={{ marginBottom: 8 }}>{r}</div>
-            <div style={{ fontSize: 14, color: COLORS.gray500, lineHeight: 1.6 }}>{t}</div>
+            <div style={{ fontSize: 14, color: T.gray500, lineHeight: 1.6 }}>{t}</div>
           </div>)}
         </div>
       </div>
       {/* Google Maps */}
-      <div style={{ padding: "60px 40px", background: "#fff" }}>
+      <div style={{ padding: "60px 40px", background: T.white }}>
         <h2 style={{ fontSize: 28, fontWeight: 800, textAlign: "center", marginBottom: 32 }}>Find Us</h2>
         <div style={{ display: "grid", gridTemplateColumns: gridCols("1fr 1fr", isMobile), gap: 32, maxWidth: 1000, margin: "0 auto" }}>
           <div style={{ borderRadius: 12, overflow: "hidden", height: 300 }}>
@@ -5054,16 +5116,16 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
           </div>
           {!isMobile && <div>
             <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>ADDRESS</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: T.gray500, marginBottom: 4 }}>ADDRESS</div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>{storefront.address}</div>
             </div>
             <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>PHONE</div>
-              <a href="tel:8645550142" style={{ fontSize: 16, fontWeight: 700, color: COLORS.blue, textDecoration: "none" }}>(864) 555-0142</a>
+              <div style={{ fontSize: 12, fontWeight: 600, color: T.gray500, marginBottom: 4 }}>PHONE</div>
+              <a href="tel:8645550142" style={{ fontSize: 16, fontWeight: 700, color: T.blue, textDecoration: "none" }}>(864) 555-0142</a>
             </div>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>HOURS</div>
-              <div style={{ fontSize: 14, color: COLORS.gray600, lineHeight: 1.6 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: T.gray500, marginBottom: 4 }}>HOURS</div>
+              <div style={{ fontSize: 14, color: T.gray600, lineHeight: 1.6 }}>
                 <div>Mon–Fri: 8am–6pm</div>
                 <div>Saturday: 8am–4pm</div>
                 <div>Sunday: Closed</div>
@@ -5073,31 +5135,31 @@ function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG })
         </div>
         {isMobile && <div style={{ marginTop: 20, textAlign: "center" }}>
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>ADDRESS</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.gray500, marginBottom: 4 }}>ADDRESS</div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>{storefront.address}</div>
           </div>
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>PHONE</div>
-            <a href="tel:8645550142" style={{ fontSize: 14, fontWeight: 700, color: COLORS.blue, textDecoration: "none" }}>(864) 555-0142</a>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.gray500, marginBottom: 4 }}>PHONE</div>
+            <a href="tel:8645550142" style={{ fontSize: 14, fontWeight: 700, color: T.blue, textDecoration: "none" }}>(864) 555-0142</a>
           </div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.gray500, marginBottom: 4 }}>HOURS</div>
-            <div style={{ fontSize: 13, color: COLORS.gray600, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.gray500, marginBottom: 4 }}>HOURS</div>
+            <div style={{ fontSize: 13, color: T.gray600, lineHeight: 1.6 }}>
               <div>Mon–Fri: 8am–6pm · Sat: 8am–4pm · Sun: Closed</div>
             </div>
           </div>
         </div>}
       </div>
       {/* Footer */}
-      <div style={{ background: COLORS.navy, padding: "40px 40px", color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
+      <div style={{ background: T.navy, padding: "40px 40px", color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
           <div><div style={{ color: "#fff", fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{storefront.name}</div><div>{storefront.address}</div><div>{storefront.hours}</div><div style={{ marginTop: 4 }}>{storefront.phone}</div></div>
           <div style={{ textAlign: "right" }}><div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>Powered by TreadFlow</div></div>
         </div>
       </div>
       {/* Mobile sticky call bar */}
-      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.orange, padding: "14px 20px", display: "flex", gap: 12, zIndex: 90 }}>
-        <a href="tel:8645550142" style={{ flex: 1, ...S.btn("dark"), justifyContent: "center", textDecoration: "none", background: COLORS.navy, fontSize: 16, fontWeight: 700 }}>📞 Call Now</a>
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: T.orange, padding: "14px 20px", display: "flex", gap: 12, zIndex: 90 }}>
+        <a href="tel:8645550142" style={{ flex: 1, ...S.btn("dark"), justifyContent: "center", textDecoration: "none", background: T.navy, fontSize: 16, fontWeight: 700 }}>📞 Call Now</a>
         <button onClick={() => nav("home")} style={{ ...S.btn("secondary", "sm"), color: "rgba(255,255,255,0.7)", background: "transparent", border: "1px solid rgba(255,255,255,0.3)", fontSize: 12 }}>← Home</button>
       </div>
       {waitlistModal}
