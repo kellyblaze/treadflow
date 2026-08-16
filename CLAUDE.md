@@ -101,6 +101,16 @@ tiers — confirmed status of the ones that were in doubt:
 
 ## Change log
 
+### 2026-08-16 — Merged and deployed the 5 pending fixes
+PR [#8](https://github.com/kellyblaze/treadflow/pull/8), merged to `main`:
+custom-domain claim removed, fake AI chatbot removed, landing-page
+checkout bypass disabled, public storefront URL routing fixed, and the
+Stripe Price ID doc note. All five were sitting unmerged on
+`claude/next-build-tasks-bypuec` across this session and the prior one;
+user asked to get them onto production rather than leave them staged.
+Vercel auto-deploys from `main`, so this is now live. The "not yet merged
+to `main`" notes on the change log entries below predate this merge.
+
 ### 2026-08-16 — Fixed public storefront URL routing
 Discovered while seeding the demo shop (see below): `Storefront`
 (`src/App.jsx`) always queried `shops` by the hardcoded slug
