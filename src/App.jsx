@@ -16,7 +16,6 @@ import {
   buildWaitlistPayload,
   parseVehicleFields,
 } from "./helpers";
-const redirectTo = (url) => { window.location.href = url; };
 const sendSms = async (to, message) => {
   try {
     const res = await fetch("/api/send-sms", {
@@ -68,7 +67,11 @@ const mockTires = [
   { id: 6, brand: "Cooper", model: "CS5 Ultra Touring", size: "235/45R18", width: 235, aspect: 45, rim: 18, condition: "New", type: "Touring", qty: 0, price: 119.99, setPrice: 459.99, tread: null, dot: "0624", load: 98, speed: "V", status: "Out of Stock", featured: false, installFee: 25, disposalFee: 5, desc: "Comfortable touring tire with strong wet traction.", images: [] },
 ];
 
-/** Public demo storefront resolves `shops.id` by slug; UUID fallback if row is missing (not used in the authenticated dashboard). */
+// Storefront's real slug always comes from the URL (/shop/{slug}[/{tireSlug}])
+// or, for internal "preview my storefront" links, from nav()'s shopSlug
+// option — see App(). This is only the last-resort fallback for the rare
+// case neither is available (e.g. someone lands on a bare "/"), so the page
+// still shows something instead of a blank storefront.
 const PUBLIC_STOREFRONT_SLUG = "greenville-tire-pros";
 const FALLBACK_PUBLIC_SHOP_ID = "00000000-0000-0000-0000-000000000001";
 const SHOP_PUBLIC_URL = "https://www.treadflow.cc";
@@ -275,28 +278,6 @@ function MetricCard({ label, value, sub, color }) {
 function LandingPage({ nav }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
-  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState(null);
-
-  const startCheckout = async (plan) => {
-    setCheckoutLoadingPlan(plan);
-    try {
-      const res = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        alert(data.error || "Unable to start checkout.");
-        setCheckoutLoadingPlan(null);
-        return;
-      }
-      redirectTo(data.url);
-    } catch (err) {
-      alert(err.message || "Unable to start checkout.");
-      setCheckoutLoadingPlan(null);
-    }
-  };
 
   const features = [
     { icon: "🛞", title: "Online Tire Storefront", desc: "Your own branded tire shop website with searchable inventory, live pricing, and tire detail pages." },
@@ -311,7 +292,7 @@ function LandingPage({ nav }) {
   const faqs = [
     ["Is TreadFlow open to any tire shop?", "No. TreadFlow is invite-only. We review each applicant for market fit and shop readiness before granting access."],
     ["How does the invite process work?", "Submit an application. Our team reviews your market and shop fit. If approved, you receive a private invite link to create your account."],
-    ["Can I have my own domain?", "Yes — custom domain support is available on the Market Leader plan."],
+    ["Can I have my own domain?", "Not yet. Every TreadFlow storefront lives at treadflow.cc/shop/your-shop-name today — custom domain support isn't available on any plan yet, but it's on our roadmap."],
     ["How long does setup take?", "Most shops are live within 5–10 business days after approval, including storefront design and inventory setup."],
     ["Do I own my customer data?", "Absolutely. Your customers, orders, and inventory data belong to you."],
   ];
@@ -379,7 +360,7 @@ function LandingPage({ nav }) {
             <div style={{ fontSize: 40, fontWeight: 800, color: p.highlight ? COLORS.blue : COLORS.gray900 }}>${p.price}<span style={{ fontSize: 16, fontWeight: 400, color: COLORS.gray400 }}>/mo</span></div>
             <div style={{ borderTop: "1px solid #E2E8F0", margin: "20px 0" }} />
             {p.features.map(f => <div key={f} style={{ display: "flex", gap: 8, fontSize: 14, color: COLORS.gray700, marginBottom: 8 }}><span style={{ color: COLORS.green }}>✓</span>{f}</div>)}
-            <button disabled={!!checkoutLoadingPlan} onClick={() => startCheckout(p.name)} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20, opacity: checkoutLoadingPlan && checkoutLoadingPlan !== p.name ? 0.6 : 1 }}>{checkoutLoadingPlan === p.name ? "Redirecting…" : "Get Started →"}</button>
+            <button onClick={() => nav("invite")} style={{ ...S.btn(p.highlight ? "primary" : "secondary"), width: "100%", justifyContent: "center", marginTop: 20 }}>Request an Invite →</button>
           </div>)}
         </div>
         <div style={{ textAlign: "center", marginTop: 40, color: COLORS.gray500, fontSize: 13 }}>
@@ -758,7 +739,7 @@ function SuperAdmin({ nav }) {
         {section === "overview" && <AdminOverview shops={shops} apps={apps} loading={shopsLoading || appsLoading} />}
         {section === "applications" && !selectedApp && (appsLoading ? <div style={{ color: COLORS.gray500 }}>Loading applications…</div> : <ApplicationsList apps={filteredApps} allApps={apps} filter={appFilter} setFilter={setAppFilter} onSelect={setSelectedApp} />)}
         {section === "applications" && selectedApp && <ApplicationDetail app={selectedApp} onBack={() => { setSelectedApp(null); setGeneratedCode(null); }} onAction={updateAppStatus} actionLoading={actionLoading} inviteCode={generatedCode} />}
-        {section === "shops" && (shopsLoading ? <div style={{ color: COLORS.gray500 }}>Loading shops…</div> : <ShopsList shops={shops} onDesign={s => { setDesignShop(s); setSection("design"); }} onView={s => nav("storefront")} onSuspend={suspendShop} />)}
+        {section === "shops" && (shopsLoading ? <div style={{ color: COLORS.gray500 }}>Loading shops…</div> : <ShopsList shops={shops} onDesign={s => { setDesignShop(s); setSection("design"); }} onView={s => nav("storefront", { shopSlug: s.slug })} onSuspend={suspendShop} />)}
         {section === "markets" && <MarketsPage shops={shops} defaultMaxShops={platformSettings?.max_shops_per_market ?? 3} showToast={showToast} />}
         {section === "design" && <StorefrontStudio shop={designShop || shops[0]} shops={shops} onShopChange={setDesignShop} showToast={showToast} />}
         {section === "plans" && <PlansPage shops={shops} />}
@@ -1455,7 +1436,7 @@ function ShopDashboard({ nav }) {
         )}
         {sidebar.map(([id, icon, label]) => <SidebarLink key={id} icon={icon} label={label} active={section === id} onClick={() => { setSection(id); setSelectedTire(null); }} />)}
         <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-          <button onClick={() => nav("storefront")} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)", width: "100%" }}>View My Storefront</button>
+          <button onClick={() => nav("storefront", { shopSlug: activeShop?.slug })} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)", width: "100%" }}>View My Storefront</button>
           <button onClick={async () => { await supabase.auth.signOut(); nav("login"); }} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.15)", width: "100%" }}>Logout</button>
           <button onClick={() => nav("home")} style={{ ...S.btn("ghost", "sm"), justifyContent: "center", color: "rgba(255,255,255,0.4)", border: "none", width: "100%" }}>← Back to Home</button>
         </div>
@@ -1483,7 +1464,7 @@ function ShopDashboard({ nav }) {
         {section === "analytics" && (planHasFeature(shopPlan, "Advanced reporting") ? <AnalyticsPage shopId={shopId} showToast={showToast} /> : <PlanUpgradeGate feature="Advanced reporting" planName={shopPlan} />)}
         {section === "staff" && (planHasFeature(shopPlan, "Staff accounts") ? <StaffPage shopId={shopId} shopName={activeShop?.name} showToast={showToast} /> : <PlanUpgradeGate feature="Staff accounts" planName={shopPlan} />)}
         {section === "locations" && (planHasFeature(shopPlan, "Multi-location support") ? <LocationsPage shops={shops} setShops={setShops} activeShop={activeShop} setActiveShop={setActiveShop} showToast={showToast} /> : <PlanUpgradeGate feature="Multi-location support" planName={shopPlan} />)}
-        {section === "settings" && <ShopSettings shopId={shopId} showToast={showToast} />}
+        {section === "settings" && <ShopSettings shopId={shopId} shopSlug={activeShop?.slug} showToast={showToast} />}
         {section === "design" && designShopRecord && <StorefrontStudio shop={designShopRecord} shops={[designShopRecord]} onShopChange={() => {}} showToast={showToast} />}
         {section === "billing" && <ShopBilling shopId={shopId} plan={activeShop?.plan} status={activeShop?.status} />}
       </div>
@@ -1497,7 +1478,7 @@ function ShopDashboard({ nav }) {
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    if (item.kind === "storefront") nav("storefront");
+                    if (item.kind === "storefront") nav("storefront", { shopSlug: activeShop?.slug });
                     else if (item.kind === "logout") handleLogout();
                     else { setSection(item.id); setSelectedTire(null); }
                   }}
@@ -3610,7 +3591,8 @@ function LocationsPage({ shops, setShops, activeShop, setActiveShop, showToast }
   </div>;
 }
 
-function ShopSettings({ shopId, showToast }) {
+function ShopSettings({ shopId, shopSlug, showToast }) {
+  const publicShopUrl = shopSlug ? `${SHOP_PUBLIC_URL}/shop/${shopSlug}` : SHOP_PUBLIC_URL;
   const isMobile = useWindowWidth() < 768;
   const galleryInputRef = useRef(null);
   const [mobileServiceEnabled, setMobileServiceEnabled] = useState(false);
@@ -3624,7 +3606,7 @@ function ShopSettings({ shopId, showToast }) {
   const [galleryImages, setGalleryImages] = useState([]);
   const [savingGallery, setSavingGallery] = useState(false);
   const [galleryStorageMissing, setGalleryStorageMissing] = useState(false);
-  const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, chatbot: true, announcement: true });
+  const [storefrontSections, setStorefrontSections] = useState({ hero_video: true, trust_badges: true, size_finder: true, maps: true, gallery: true, services: true, reviews: true, announcement: true });
   const [savingStorefrontSections, setSavingStorefrontSections] = useState(false);
   const [googleReviewUrl, setGoogleReviewUrl] = useState("");
   const [savingGoogleReviewUrl, setSavingGoogleReviewUrl] = useState(false);
@@ -3962,7 +3944,7 @@ function ShopSettings({ shopId, showToast }) {
         <div style={{ fontWeight: 700, marginBottom: 16 }}>Storefront Sections</div>
         <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 16 }}>Choose which sections appear on your public storefront.</div>
         <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-          {[["hero_video", "Hero Video Background"], ["announcement", "Announcement Bar"], ["trust_badges", "Trust Badges"], ["size_finder", "Tire Size Finder Button"], ["services", "Services Section"], ["gallery", "Photo Gallery"], ["maps", "Google Maps"], ["reviews", "Customer Reviews"], ["chatbot", "Live Chatbot"]].map(([key, label]) => (
+          {[["hero_video", "Hero Video Background"], ["announcement", "Announcement Bar"], ["trust_badges", "Trust Badges"], ["size_finder", "Tire Size Finder Button"], ["services", "Services Section"], ["gallery", "Photo Gallery"], ["maps", "Google Maps"], ["reviews", "Customer Reviews"]].map(([key, label]) => (
             <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
               <input
                 type="checkbox"
@@ -3979,15 +3961,15 @@ function ShopSettings({ shopId, showToast }) {
       <div style={S.card}>
         <div style={{ fontWeight: 700, marginBottom: 16 }}>QR Code</div>
         <div style={{ fontSize: 13, color: COLORS.gray500, marginBottom: 14 }}>Put this on receipts, business cards, your shop window, or anywhere customers can scan it to find your tires online</div>
-        <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(SHOP_PUBLIC_URL)}`} alt="Shop storefront QR code" style={{ width: 200, height: 200, display: "block", border: `1px solid ${COLORS.gray200}`, borderRadius: 10, marginBottom: 14 }} />
+        <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicShopUrl)}`} alt="Shop storefront QR code" style={{ width: 200, height: 200, display: "block", border: `1px solid ${COLORS.gray200}`, borderRadius: 10, marginBottom: 14 }} />
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a href={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(SHOP_PUBLIC_URL)}`} download="treadflow-storefront-qr.png" style={{ ...S.btn("primary"), textDecoration: "none" }}>Download</a>
+          <a href={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicShopUrl)}`} download="treadflow-storefront-qr.png" style={{ ...S.btn("primary"), textDecoration: "none" }}>Download</a>
           <button
             type="button"
             onClick={() => {
               const printWindow = window.open("", "_blank", "width=420,height=520");
               if (!printWindow) return;
-              printWindow.document.write(`<html><head><title>Storefront QR Code</title></head><body style="font-family:system-ui,sans-serif;text-align:center;padding:32px"><h2>${storefront.name}</h2><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(SHOP_PUBLIC_URL)}" width="200" height="200"/><p>${SHOP_PUBLIC_URL}</p><script>window.onload=()=>window.print()</script></body></html>`);
+              printWindow.document.write(`<html><head><title>Storefront QR Code</title></head><body style="font-family:system-ui,sans-serif;text-align:center;padding:32px"><h2>${storefront.name}</h2><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicShopUrl)}" width="200" height="200"/><p>${publicShopUrl}</p><script>window.onload=()=>window.print()</script></body></html>`);
               printWindow.document.close();
             }}
             style={S.btn("secondary")}
@@ -4237,7 +4219,7 @@ export async function storefrontSubmitReservation(shopId, {
 }
 
 // ── 6. PUBLIC STOREFRONT ──────────────────────────────────────────────────
-function Storefront({ nav, initialTireSlug }) {
+function Storefront({ nav, initialTireSlug, shopSlug = PUBLIC_STOREFRONT_SLUG }) {
   const width = useWindowWidth();
   const isMobile = width < 768;
   const [publicShopId, setPublicShopId] = useState(FALLBACK_PUBLIC_SHOP_ID);
@@ -4294,7 +4276,7 @@ function Storefront({ nav, initialTireSlug }) {
     supabase
       .from("shops")
       .select("id, name, email, phone, plan, mobile_service_enabled, mobile_service_radius, mobile_service_fee, mobile_service_hours_start, mobile_service_hours_end, hero_video_url, storefront_sections, deposit_amount")
-      .eq("slug", PUBLIC_STOREFRONT_SLUG)
+      .eq("slug", shopSlug)
       .maybeSingle()
       .then(({ data }) => {
         if (cancelled || !data?.id) return;
@@ -4315,7 +4297,7 @@ function Storefront({ nav, initialTireSlug }) {
         });
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [shopSlug]);
 
   useEffect(() => {
     if (!publicShopId) return;
@@ -4441,9 +4423,6 @@ function Storefront({ nav, initialTireSlug }) {
     }
   }, [publicShopId]);
 
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState([{ from: "bot", text: "Hi! Welcome to Greenville Tire Pros. Ask me anything about our inventory, services, or hours." }]);
   const [showTireSizeFinder, setShowTireSizeFinder] = useState(false);
   const [tireWidth, setTireWidth] = useState("");
   const [tireAspectRatio, setTireAspectRatio] = useState("");
@@ -4465,7 +4444,7 @@ function Storefront({ nav, initialTireSlug }) {
   const heroVideoUrl = publicShopInfo.hero_video_url || defaultHeroVideoUrl;
   const heroVideoEnabled = publicShopInfo.storefront_sections?.hero_video !== false;
   const heroVideoType = heroVideoUrl.toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4";
-  const selectedTireUrl = selectedTire ? `${window.location.origin}${tirePagePath(selectedTire)}` : `${window.location.origin}/shop/${PUBLIC_STOREFRONT_SLUG}`;
+  const selectedTireUrl = selectedTire ? `${window.location.origin}${tirePagePath(selectedTire, shopSlug)}` : `${window.location.origin}/shop/${shopSlug}`;
 
   useEffect(() => {
     if (!initialTireSlug || selectedTire) return;
@@ -4495,7 +4474,7 @@ function Storefront({ nav, initialTireSlug }) {
       document.title = `${publicShopInfo.name || storefront.name} | TreadFlow`;
       return;
     }
-    const path = tirePagePath(selectedTire);
+    const path = tirePagePath(selectedTire, shopSlug);
     if (window.location.pathname !== path) window.history.pushState({ tireId: selectedTire.id }, "", path);
     document.title = `${selectedTire.brand} ${selectedTire.model} ${selectedTire.size} - ${publicShopInfo.name || storefront.name} | TreadFlow`;
     const trackKey = String(selectedTire.id);
@@ -4507,7 +4486,7 @@ function Storefront({ nav, initialTireSlug }) {
         if (error) console.warn("Tire view tracking failed:", error.message);
       });
     }
-  }, [publicShopId, publicShopInfo.name, selectedTire]);
+  }, [publicShopId, publicShopInfo.name, selectedTire, shopSlug]);
 
   const openWaitlist = (tire) => {
     setWaitlistTire(tire);
@@ -4534,7 +4513,7 @@ function Storefront({ nav, initialTireSlug }) {
   const openShare = (tire) => setShareTire(tire);
 
   const copyShareLink = async () => {
-    const url = shareTire ? `${window.location.origin}${tirePagePath(shareTire)}` : selectedTireUrl;
+    const url = shareTire ? `${window.location.origin}${tirePagePath(shareTire, shopSlug)}` : selectedTireUrl;
     await navigator.clipboard?.writeText(url);
   };
 
@@ -4554,7 +4533,7 @@ function Storefront({ nav, initialTireSlug }) {
     </div>
   );
 
-  const shareUrl = shareTire ? `${window.location.origin}${tirePagePath(shareTire)}` : selectedTireUrl;
+  const shareUrl = shareTire ? `${window.location.origin}${tirePagePath(shareTire, shopSlug)}` : selectedTireUrl;
   const shareName = shareTire ? `${shareTire.brand} ${shareTire.model} ${shareTire.size}` : "";
   const shareModal = shareTire && (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 20 }}>
@@ -4585,19 +4564,6 @@ function Storefront({ nav, initialTireSlug }) {
       </div>
     </div>
   );
-
-  const sendChat = () => {
-    if (!chatInput.trim()) return;
-    const msg = chatInput.toLowerCase();
-    let reply = "I'm not sure about that. Please call us at (864) 555-0142 for more info!";
-    if (msg.includes("hour") || msg.includes("open")) reply = "We're open Mon–Fri 8am–6pm and Saturday 8am–4pm. Closed Sundays.";
-    else if (msg.includes("install")) reply = "Installation starts at $25 per tire. Book online or call us to schedule.";
-    else if (msg.includes("used")) reply = "Yes! We sell quality used tires, all inspected and priced fairly.";
-    else if (msg.includes("reserve") || msg.includes("order")) reply = "You can reserve tires directly from the tire listing. Click 'Reserve Now' on any tire card.";
-    else if (msg.includes("225") || msg.includes("215") || msg.includes("265") || msg.includes("tire")) reply = "We have new and used tires in stock! Use the search and filter above to find your size.";
-    setChatMessages(m => [...m, { from: "user", text: chatInput }, { from: "bot", text: reply }]);
-    setChatInput("");
-  };
 
   if (orderDone) return (
     <div style={{ minHeight: "100vh", background: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
@@ -5129,25 +5095,6 @@ function Storefront({ nav, initialTireSlug }) {
           <div style={{ textAlign: "right" }}><div style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>Powered by TreadFlow</div></div>
         </div>
       </div>
-      {/* Chatbot */}
-      <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 100 }}>
-        {chatOpen && <div style={{ width: 320, background: "#fff", borderRadius: 16, border: "1px solid #E2E8F0", boxShadow: "0 8px 32px rgba(0,0,0,0.15)", marginBottom: 12, overflow: "hidden" }}>
-          <div style={{ background: storefront.primaryColor, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>🤖 Greenville Tire Chat</div>
-            <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18 }}>×</button>
-          </div>
-          <div style={{ height: 220, overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-            {chatMessages.map((m, i) => <div key={i} style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start" }}>
-              <div style={{ background: m.from === "bot" ? COLORS.gray100 : storefront.primaryColor, color: m.from === "user" ? "#fff" : COLORS.gray800, borderRadius: 10, padding: "8px 12px", fontSize: 13, maxWidth: "80%", lineHeight: 1.5 }}>{m.text}</div>
-            </div>)}
-          </div>
-          <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: "1px solid #E2E8F0" }}>
-            <input style={{ ...S.input, flex: 1, fontSize: 13 }} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendChat()} placeholder="Ask a question..." />
-            <button onClick={sendChat} style={{ ...S.btn("primary", "sm") }}>→</button>
-          </div>
-        </div>}
-        <button onClick={() => setChatOpen(!chatOpen)} style={{ width: 56, height: 56, borderRadius: "50%", background: storefront.primaryColor, border: "none", color: "#fff", fontSize: 24, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>{chatOpen ? "×" : "💬"}</button>
-      </div>
       {/* Mobile sticky call bar */}
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.orange, padding: "14px 20px", display: "flex", gap: 12, zIndex: 90 }}>
         <a href="tel:8645550142" style={{ flex: 1, ...S.btn("dark"), justifyContent: "center", textDecoration: "none", background: COLORS.navy, fontSize: 16, fontWeight: 700 }}>📞 Call Now</a>
@@ -5619,7 +5566,9 @@ function SignUpPage({ nav }) {
 }
 
 export default function App() {
-  const initialStorefrontMatch = typeof window !== "undefined" ? window.location.pathname.match(/^\/shop\/([^/]+)\/([^/]+)\/?$/) : null;
+  // Matches both /shop/{slug} (browsing the grid) and /shop/{slug}/{tireSlug}
+  // (a deep link to one tire) — the tire segment is optional.
+  const initialStorefrontMatch = typeof window !== "undefined" ? window.location.pathname.match(/^\/shop\/([^/]+)(?:\/([^/]+))?\/?$/) : null;
   const initialStaffInviteCode = typeof window !== "undefined" && window.location.pathname === "/staff-invite" ? new URLSearchParams(window.location.search).get("code") : null;
   // Supabase's default email confirmation link redirects back with
   // #access_token=...&type=signup in the hash; detectSessionInUrl (supabase.js)
@@ -5640,6 +5589,11 @@ export default function App() {
     return "home";
   });
   const [initialTireSlug, setInitialTireSlug] = useState(initialStorefrontMatch?.[2] || "");
+  // The shop slug straight from the URL a customer landed on. Internal
+  // "preview my storefront" links don't go through a URL at all, so those
+  // set storefrontShopSlug via nav() instead — see nav()'s shopSlug option.
+  const [initialShopSlug] = useState(initialStorefrontMatch?.[1] || "");
+  const [storefrontShopSlug, setStorefrontShopSlug] = useState(null);
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [intendedPage, setIntendedPage] = useState("shop");
@@ -5703,7 +5657,7 @@ export default function App() {
     if (initialAuthHashType === "signup" && page === "home") setPage("shop");
   }, [authReady, session, initialAuthHashType, page]);
 
-  const nav = (p) => {
+  const nav = (p, { shopSlug } = {}) => {
     const protectedPages = new Set(["shop", "admin"]);
     if (protectedPages.has(p) && !session) {
       setIntendedPage(p);
@@ -5711,6 +5665,7 @@ export default function App() {
       return;
     }
     if (p !== "storefront") setInitialTireSlug("");
+    else if (shopSlug) setStorefrontShopSlug(shopSlug);
     setPage(p);
   };
 
@@ -5747,7 +5702,7 @@ export default function App() {
         )
       )}
       {page === "shop" && (authReady ? (session ? <ShopDashboard nav={nav} /> : <LoginPage nav={nav} />) : <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>Loading...</div>)}
-      {page === "storefront" && <Storefront nav={nav} initialTireSlug={initialTireSlug} />}
+      {page === "storefront" && <Storefront nav={nav} initialTireSlug={initialTireSlug} shopSlug={storefrontShopSlug || initialShopSlug || PUBLIC_STOREFRONT_SLUG} />}
       {page === "sms-terms" && <SmsTermsPage nav={nav} />}
     </div>
   );

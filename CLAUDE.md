@@ -17,6 +17,7 @@ the file in sync with reality rather than letting it drift.
 | Supabase project | ref `uuivxrphoviaqehhpxdy`, org `mhwkxpyazswbrylzrxpb`, region us-east-2, under account `info@treadflow.cc` — **always confirm with `list_projects` before running any migration**; a differently-named project ("EverBranch") has shown up connected in this environment before. |
 | Platform admin | `kellyblazeent@gmail.com` is the first (and currently only) `platform_admins` row, granted via manual SQL after self-registering through the real signup flow. |
 | Migrations | Every file in `supabase/migrations/` has been applied to the live project, through `20260720000010_shop_owner_invite_acceptance.sql`. Apply new ones with the Supabase MCP `apply_migration` tool, not raw `psql`. |
+| Demo shop | `Greenville Tire Pros` (slug `greenville-tire-pros`), plan Market Leader, `shops.user_id` set to the platform admin's own auth id — so `kellyblazeent@gmail.com` owns both Super Admin and this shop. Seeded directly via SQL (10 tires, 4 customers, 6 orders, 4 appointments, 3 promotions, 2 invoices, 1 invited staff row) for manual QA. Not part of any migration — pure data, safe to delete/reseed. |
 
 ## What's actually built vs. what just looks built
 
@@ -31,23 +32,54 @@ tiers — confirmed status of the ones that were in doubt:
 - ✅ Real (as of this session): plan-tier gating — `planHasFeature()` in
   `src/helpers.js` enforces which of the above a shop's plan actually
   includes, everywhere they're used.
-- ❌ **AI chatbot** — not real AI. `sendChat()` in `Storefront` is a
-  hardcoded keyword-matcher, and it's not even shop-specific (replies
-  reference a fixed demo shop name/phone regardless of which real shop is
-  running it).
-- ❌ **Custom domain support** — doesn't exist anywhere in the codebase.
-  The FAQ answer claiming it's available on Market Leader is the only
-  place this feature is mentioned at all.
+- ✅ Removed (as of this session): **AI chatbot** — was never real AI
+  (`sendChat()` in `Storefront` was a hardcoded keyword-matcher, and not
+  even shop-specific — every shop showed a widget hardcoded to
+  "Greenville Tire Chat"/a demo phone number). Decision was to rip out
+  the fake widget and the pricing claim rather than build a real one —
+  no chatbot ships today on any plan. See change log.
+- ❌ **Custom domain support** — still doesn't exist anywhere in the
+  codebase. As of this session the pricing page no longer claims
+  otherwise (see change log) — this line now just tracks that the
+  underlying feature remains unbuilt, not a false-advertising bug.
 - ✅ Real (as of this session): **shop creation after signup** — was
   confirmed broken (no code path, client or database, ever created a
   `shops` row after invite → approve → signup), now fixed via
   `accept_shop_invite()`, see change log.
-- ⚠️ **Landing-page pricing checkout bypasses the invite-only funnel** —
-  a visitor can pay before being invited, and that payment doesn't create
-  or link to a shop record. Left as-is deliberately (product decision, not
-  a bug) while other billing mechanics were hardened.
+- ✅ Fixed (as of this session): **landing-page checkout bypassing the
+  invite-only funnel** — re-investigated; this wasn't just a soft
+  funnel-skip as previously logged, it was an active billing bug: a
+  stranger could pay a real recurring Stripe subscription with zero
+  confirmation and zero shop/account ever created (the webhook no-ops
+  when it can't match an existing `shops` row). Confirmed unintended
+  with the user; "Get Started" now routes to the invite-application
+  form instead of Stripe Checkout. See change log.
+- ✅ Fixed (as of this session): **public storefront URL routing** —
+  discovered while seeding the demo shop. `Storefront` always fetched the
+  shop hardcoded to slug `"greenville-tire-pros"` regardless of the URL,
+  and the initial-page-routing regex required a trailing tire slug, so a
+  bare `/shop/{slug}` link didn't even reach the storefront page. Every
+  shop's public storefront resolved to whichever shop happened to have
+  that exact slug — real multi-tenant routing by slug didn't exist.
+  Fixed: the URL regex now makes the tire segment optional, the resolved
+  slug flows into `<Storefront shopSlug>` and its Supabase query, and
+  internal "preview my storefront" links (dashboard sidebar, mobile nav,
+  Super Admin's shop list) now pass the real shop's slug through a new
+  `nav(page, { shopSlug })` option instead of relying on the hardcoded
+  default. Shop Settings' QR code/print view was also pointing at the
+  bare homepage regardless of shop — now builds `{SHOP_PUBLIC_URL}/shop/
+  {slug}` from the real slug. `PUBLIC_STOREFRONT_SLUG` stays as a
+  last-resort fallback only. Build clean, lint baseline improved (35 vs
+  the prior 36), all 54 tests pass.
 - ⚠️ Real Stripe Price IDs for the 3 plans (`STRIPE_PRICE_EARLY_PARTNER`
-  etc.) — status not reconfirmed this session; see README's env var table.
+  etc.) — still not reconfirmed; this session couldn't check either (no
+  Vercel/Stripe credentials in this environment — `vercel whoami` logs
+  out, no `STRIPE_*` env vars available here). Lower urgency than it
+  looks: since the checkout-bypass fix above, nothing in the live UI
+  calls `/api/create-checkout-session` anymore, so these vars are
+  dormant config, not a live-flow risk. User chose to skip verifying
+  this for now; revisit if/when a real self-serve billing flow gets
+  built. See README's env var table.
 
 ## Environment constraints worth remembering
 
@@ -68,6 +100,111 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-16 — Fixed public storefront URL routing
+Discovered while seeding the demo shop (see below): `Storefront`
+(`src/App.jsx`) always queried `shops` by the hardcoded slug
+`"greenville-tire-pros"`, ignoring whatever was actually in the URL, and
+the top-level routing regex (`/^\/shop\/([^/]+)\/([^/]+)\/?$/`) required a
+trailing tire-slug segment, so a bare `/shop/{slug}` link didn't even
+resolve to the storefront page — it fell through to the marketing
+homepage. Net effect: real multi-tenant storefront routing by slug never
+existed; every shop's public storefront showed whichever shop happened to
+have that one hardcoded slug. Fix: made the tire segment in the routing
+regex optional and capture the shop slug separately; threaded that slug
+(or an explicit override) into `<Storefront shopSlug>` and its Supabase
+query; extended `nav()` to accept a `{ shopSlug }` option and updated the
+three internal "preview my storefront" call sites (dashboard sidebar,
+mobile bottom nav, Super Admin's shop list "View") to pass the real
+shop's slug instead of relying on the hardcoded default; fixed Shop
+Settings' QR code/print view, which was pointing at the bare homepage
+regardless of which shop it belonged to, to build the real
+`{SHOP_PUBLIC_URL}/shop/{slug}` URL. `PUBLIC_STOREFRONT_SLUG` remains only
+as a last-resort fallback when no slug is available at all. Build clean,
+lint baseline improved (35 vs. the prior 36), all 54 tests pass. Not yet
+merged to `main` (open on `claude/next-build-tasks-bypuec`, no PR opened
+per instructions not to open one unless asked).
+
+### 2026-08-16 — Seeded a live demo shop for manual QA
+At the user's request, created a fully-populated demo shop directly in
+the live Supabase project (confirmed correct project via `list_projects`
+first, per standing instructions) so the app could be tested end-to-end
+without the credential/payment restrictions of this environment blocking
+it. `shops.user_id` was set to the platform admin's own auth id
+(`kellyblazeent@gmail.com`), so that one login now reaches both Super
+Admin and a real Shop Dashboard — no separate signup needed. Seeded
+"Greenville Tire Pros" on the Market Leader plan (so every gated feature
+is visible) with 10 tires, 4 customers, 6 orders, 4 appointments, 3
+promotions, 2 invoices, and 1 invited staff row, covering a spread of
+statuses (pending/confirmed/completed/cancelled orders, a mobile-service
+order, an expired promotion, low-stock and out-of-stock tires, an
+appointment with no linked order) so most UI states have real data to
+render against. Chose the slug `greenville-tire-pros` specifically
+because it's what the storefront's data fetch was hardcoded to look up
+at the time — which is what surfaced the routing bug fixed right after,
+see above. Delivered the user a full QA checklist as a published
+artifact, organized by app area, covering the public site, storefront,
+full shop dashboard, and Super Admin.
+
+### 2026-08-15 — Disabled the landing-page checkout bypass
+Re-investigated the "landing-page checkout bypasses invite funnel" item
+flagged (but left as-is) in an earlier session, at the user's request to
+confirm whether it was intended. It wasn't just a funnel-skip: the public
+pricing page's "Get Started" buttons created a real Stripe subscription
+Checkout Session for anyone, invited or not
+(`/api/create-checkout-session`). On success Stripe redirected to
+`/?checkout_success=true`, which the app never handled anywhere — no
+confirmation, no next steps. The `checkout.session.completed` webhook
+looks up a `shops` row by `stripe_customer_id`/email to apply the
+update; a brand-new payer with no invited account matches nothing, so
+`applyShopUpdate` silently no-ops. Net effect: a stranger could be
+charged a real recurring subscription and get nothing — no account, no
+shop, no error, no automated recovery path. Presented the finding to the
+user, who confirmed this was unintended and chose to disable public
+checkout entirely. Fix: "Get Started" buttons now call `nav("invite")`
+instead of `startCheckout()`, routing to the invite-application form —
+matches the pricing section's own existing copy ("Plans are assigned
+after your application is reviewed and approved"). Removed the dead
+`startCheckout()`/`checkoutLoadingPlan` state and the unused
+module-level `redirectTo()` helper. Left `api/create-checkout-session.js`
+in place (unreachable from the UI now, but harmless — reusable if a real
+post-approval self-serve billing flow is ever built; today
+`ShopBilling`/Settings > Billing is read-only, plan is set manually by a
+super admin on approval). Build clean, lint baseline unchanged (36), all
+54 tests pass. Not yet merged to `main` (open on
+`claude/next-build-tasks-bypuec`, no PR opened per instructions not to
+open one unless asked).
+
+### 2026-08-15 — Removed the fake AI chatbot instead of building it
+Decision: rip out the "AI chatbot" claim rather than wire it to a real
+LLM. Removed from `src/helpers.js` (Market Leader pricing bullet) and
+from `src/App.jsx`: the storefront's floating chat widget
+(`chatOpen`/`chatInput`/`chatMessages` state, `sendChat()`
+keyword-matcher, and its JSX), plus the now-inert "Live Chatbot" toggle
+in Shop Settings > Storefront Sections (nothing read
+`storefrontSections.chatbot` once the widget was gone). The widget was
+never real AI and wasn't even shop-specific — it showed "Greenville Tire
+Chat" and a demo phone number on every shop's live storefront regardless
+of which real shop was running it, so this was a live broken feature for
+any real customer, not just a marketing overclaim. Left the "AI chatbot"
+checkbox on the invite-application form (`InvitePage`) untouched — that's
+an applicant interest survey, not a claim of an existing feature. Build
+clean, lint baseline unchanged (36), all 54 tests pass. Not yet merged to
+`main` (open on `claude/next-build-tasks-bypuec`, no PR opened per
+instructions not to open one unless asked).
+
+### 2026-08-15 — Stop advertising nonexistent custom domain support
+Pricing-page FAQ claimed "Yes — custom domain support is available on the
+Market Leader plan," and "Custom domain support" appeared as a Market
+Leader bullet in `PLAN_TIER_DEFS` (`src/helpers.js`) — both false, no code
+anywhere implements it (every storefront is served at
+`treadflow.cc/shop/{slug}`). Rewrote the FAQ answer to say honestly that
+it isn't available yet, and dropped the bullet. Not read by
+`planHasFeature()` gating anywhere, so copy-only, no behavior change.
+Building the real feature (DNS verification + Vercel Domains API) is
+still open, tracked in the audit table above. Not yet merged to `main`
+(open on `claude/next-build-tasks-bypuec`, no PR opened per instructions
+not to open one unless asked).
 
 ### 2026-08-15 — Shop creation on signup was completely broken; fixed
 Confirmed the open item from the audit: no code path anywhere — client or
