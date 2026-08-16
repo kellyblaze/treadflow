@@ -16,7 +16,7 @@ the file in sync with reality rather than letting it drift.
 | Vercel deploys | Auto-deploys on push/merge to `main` via GitHub integration. Manual `vercel --prod` from this CLI session returns "Not authorized" (needs `--scope powerlink-marketing-groups-projects`) — usually irrelevant since merging to `main` deploys automatically anyway. |
 | Supabase project | ref `uuivxrphoviaqehhpxdy`, org `mhwkxpyazswbrylzrxpb`, region us-east-2, under account `info@treadflow.cc` — **always confirm with `list_projects` before running any migration**; a differently-named project ("EverBranch") has shown up connected in this environment before. |
 | Platform admin | `kellyblazeent@gmail.com` is the first (and currently only) `platform_admins` row, granted via manual SQL after self-registering through the real signup flow. |
-| Migrations | Every file in `supabase/migrations/` has been applied to the live project, through `20260720000010_shop_owner_invite_acceptance.sql`. Apply new ones with the Supabase MCP `apply_migration` tool, not raw `psql`. |
+| Migrations | Every file in `supabase/migrations/` has been applied to the live project, through `20260720000011_storefront_theme.sql`. Apply new ones with the Supabase MCP `apply_migration` tool, not raw `psql`. |
 | Demo shop | `Greenville Tire Pros` (slug `greenville-tire-pros`), plan Market Leader, `shops.user_id` set to the platform admin's own auth id — so `kellyblazeent@gmail.com` owns both Super Admin and this shop. Seeded directly via SQL (10 tires, 4 customers, 6 orders, 4 appointments, 3 promotions, 2 invoices, 1 invited staff row) for manual QA. Not part of any migration — pure data, safe to delete/reseed. |
 
 ## What's actually built vs. what just looks built
@@ -32,6 +32,11 @@ tiers — confirmed status of the ones that were in doubt:
 - ✅ Real (as of this session): plan-tier gating — `planHasFeature()` in
   `src/helpers.js` enforces which of the above a shop's plan actually
   includes, everywhere they're used.
+- ✅ New (as of this session): **storefront themes** — each shop can pick
+  one of 7 visual identities for its public storefront (Shop Settings >
+  Storefront Theme), stored in `shops.storefront_theme`. Not a pricing-page
+  claim (wasn't advertised before, isn't now), just a real capability. See
+  change log for the architecture.
 - ✅ Removed (as of this session): **AI chatbot** — was never real AI
   (`sendChat()` in `Storefront` was a hardcoded keyword-matcher, and not
   even shop-specific — every shop showed a widget hardcoded to
@@ -100,6 +105,35 @@ tiers — confirmed status of the ones that were in doubt:
   migration via Supabase MCP → Vercel auto-deploys.
 
 ## Change log
+
+### 2026-08-16 — Storefront themes: 7 selectable visual identities
+User asked to explore a more distinctive storefront look "without
+disturbing what we have," reviewable before committing. Built 6 fully
+distinct design concepts (Pit Lane, Workshop Ledger, Open Road, Spec
+Sheet, Showroom, Line & Tread) as standalone mockup artifacts first — no
+code touched — then, once the user asked to make all six real, agreed
+scope with them before building: storefront only (not dashboard or
+marketing site), each shop picks its own via a new Shop Settings section
+(matching the existing Storefront Sections pattern).
+
+Architecture: `STOREFRONT_THEMES` (`src/helpers.js`) defines 7 themes —
+the 6 above plus `classic`, engineered to reproduce today's hardcoded
+`COLORS` values exactly — each shaped identically to the existing
+`COLORS` constant (`navy`, `blue`, `gray50`–`gray900`, etc.) plus
+`accent`/`heroBg`/font tokens. Inside `Storefront`, `T = theme.colors`
+shadows `COLORS` for that component only; every `COLORS.x` reference in
+`Storefront`'s ~900 lines now resolves through `T` (mechanical scoped
+replacement, zero JSX/logic changes — no feature, handler, or route
+touched). `shops.storefront_theme` (migration
+`20260720000011_storefront_theme.sql`, default `'classic'`) is fetched
+alongside the shop's other public info and resolved to a theme, falling
+back to classic for unset/unknown values. New "Storefront Theme" card in
+Shop Settings lets an owner switch instantly. Scope deliberately excludes
+a few universally-semantic colors (error/success alert tints, drop
+shadows) that stay constant across all themes by design, matching the
+"semantic color isn't your accent" principle. Build clean, lint baseline
+unchanged (35), all 54 tests pass. Not yet merged to `main` (open on
+`claude/next-build-tasks-bypuec`).
 
 ### 2026-08-16 — Merged and deployed the 5 pending fixes
 PR [#8](https://github.com/kellyblaze/treadflow/pull/8), merged to `main`:
